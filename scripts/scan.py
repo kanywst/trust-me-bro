@@ -58,6 +58,10 @@ TEXT_SUFFIXES = {
 }
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".mypy_cache"}
 MAX_BYTES = 2_000_000
+# No reviewable line is this long. Matching is capped here so a hostile skill
+# cannot hand the regex engine a 50 KB line and stall the scan; the line is
+# still reported, because an unreadable line is itself worth knowing about.
+MAX_LINE = 2_000
 
 # A detached signature or an attestation. A certificate or a public key is not
 # one: shipping cosign.pub proves nothing was signed, only that someone has a
@@ -106,27 +110,54 @@ def load_rules(path: Path = RULES_PATH) -> dict:
     return raw
 
 
-def iter_files(root: Path):
-    """Every file in the target, including binaries. Filtering happens later.
+def iter_files(root: Path, links: list[dict] | None = None):
+    """Every real file in the target, including binaries. Filtering happens later.
 
     The lock has to cover files the rules cannot read, or swapping a binary
     payload would slip past --check.
+
+    Symlinks are never followed and never read. A skill can ship
+    `notes.md -> ~/.aws/credentials`, and following it would make this tool
+    print the reader's own secrets into its own report, which is the exact
+    failure it exists to prevent. They are collected in `links` instead so the
+    caller can report them.
     """
-    if root.is_file():
+    if root.is_file() and not root.is_symlink():
         yield root
         return
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for name in sorted(dirnames):
+            directory = Path(dirpath) / name
+            if directory.is_symlink() and links is not None:
+                links.append(link_record(root, directory))
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not (Path(dirpath) / d).is_symlink()]
         for name in sorted(filenames):
             path = Path(dirpath) / name
             if name in (LOCK_NAME, IGNORE_NAME):
                 continue  # the detector's own bookkeeping is not a target
+            if path.is_symlink():
+                if links is not None:
+                    links.append(link_record(root, path))
+                continue
             try:
                 if path.resolve() == RULES_PATH:
                     continue
             except OSError:
                 continue
             yield path
+
+
+def link_record(root: Path, path: Path) -> dict:
+    base = (root if root.is_dir() else root.parent).resolve()
+    try:
+        target = os.readlink(path)
+    except OSError:
+        target = "?"
+    try:
+        escapes = not path.resolve().is_relative_to(base)
+    except (OSError, ValueError):
+        escapes = True
+    return {"file": relative_name(root, path), "target": str(target), "escapes": escapes}
 
 
 def is_readable_text(path: Path) -> bool:
@@ -280,12 +311,14 @@ def scan(root: Path, rules: dict) -> dict:
     hosts: dict[str, int] = {}
     digests: dict[str, str] = {}
     unread: list[str] = []
+    longline: list[str] = []
+    links: list[dict] = []
     declares_allowed_tools = False
     scanned = 0
 
     allowlist = set(rules["host_allowlist"])
 
-    for path in iter_files(root):
+    for path in iter_files(root, links):
         rel = relative_name(root, path)
 
         # Hash first and unconditionally. A file the rules cannot read is
@@ -309,6 +342,8 @@ def scan(root: Path, rules: dict) -> dict:
         if text is None:
             continue
         scanned += 1
+        if any(len(line) > MAX_LINE for line in text.splitlines()):
+            longline.append(rel)
 
         result = scan_text(rel, path, text, rules)
         findings += result["findings"]
@@ -324,6 +359,14 @@ def scan(root: Path, rules: dict) -> dict:
         findings.append(synthetic(rules, "META-NO-ALLOWED-TOOLS"))
     for rel in unread:
         findings.append(synthetic(rules, "SCAN-TOO-LARGE", file=rel))
+    for rel in longline:
+        findings.append(synthetic(rules, "OBFUS-LONG-LINE", file=rel))
+    for link in links:
+        # A link is hashed by where it points, so retargeting it is drift even
+        # though no byte inside the skill changed.
+        digests[link["file"]] = "symlink:" + hashlib.sha256(link["target"].encode("utf-8")).hexdigest()
+        rule = "LINK-ESCAPES-TREE" if link["escapes"] else "LINK-PRESENT"
+        findings.append(synthetic(rules, rule, file=link["file"], extra=f" -> {link['target']}"))
 
     ignored = load_ignores(root)
     if ignored:
@@ -340,6 +383,7 @@ def scan(root: Path, rules: dict) -> dict:
         "files_scanned": scanned,
         "files_hashed": len(digests),
         "files_unread": sorted(unread),
+        "symlinks": links,
         "findings": findings,
         "mentions": mentions,
         "legs": legs,
@@ -356,7 +400,8 @@ def match_lines(
     pattern: re.Pattern, lines: list[str], mask: list[bool], cap: int = 3, negation_safe: bool = False
 ) -> list[dict]:
     hits = []
-    for index, line in enumerate(lines):
+    for index, raw_line in enumerate(lines):
+        line = raw_line if len(raw_line) <= MAX_LINE else raw_line[:MAX_LINE]
         match = pattern.search(line)
         if not match:
             continue
@@ -510,8 +555,11 @@ def render(report: dict, color: bool) -> str:
         for finding in report["findings"]:
             mark = SEV_MARK[finding["severity"]]
             out.append(f"    {mark} {finding['id']}  {finding['title']}")
-            for hit in finding["hits"]:
-                out.append(f"         {finding['file']}:{hit['line']}  {hit['text']}")
+            if finding["hits"]:
+                for hit in finding["hits"]:
+                    out.append(f"         {finding['file']}:{hit['line']}  {hit['text']}")
+            elif finding["file"] != "-":
+                out.append(f"         {finding['file']}")
             out.append(f"         why: {finding['why']}")
         out.append("")
 

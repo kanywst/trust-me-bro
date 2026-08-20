@@ -65,14 +65,16 @@ git clone --depth 1 https://github.com/kanywst/trust-me-bro
 
 Then just say "I'm about to install this skill" and it triggers.
 
-Yes, you should audit this one too. The two things you are installing are `SKILL.md` and `scripts/scan.py`, and both come out clean:
+Yes, you should audit this one too. The two things you install are `SKILL.md` and `scripts/scan.py`:
 
 ```bash
 python3 trust-me-bro/scripts/scan.py trust-me-bro/SKILL.md
 python3 trust-me-bro/scripts/scan.py trust-me-bro/scripts
 ```
 
-Point it at the whole repository instead and it says **STOP**, because the repository ships `examples/evil-skill/` and a test suite full of attack strings. That is the tool being right about the text in front of it and wrong about what the text is for, which is the exact limitation the rest of this README is about. It is a scanner, not a mind reader.
+Both come back `LOOKS PLAIN` with no findings and exit `0`, and both still tick the **private data** leg, because the scanner's own pattern list names `~/.ssh` and `.env` in order to look for them. One leg on its own is not the trifecta and there is no outbound channel here, which is why the verdict stays where it is. It is the same false positive every security tool produces about itself, reported rather than special-cased.
+
+Point it at the whole repository and it says **STOP**, because the repository ships `examples/evil-skill/` and a test suite full of attack strings. That is the tool being right about the text in front of it and wrong about what the text is for, which is the exact limitation the rest of this README is about. It is a scanner, not a mind reader.
 
 No dependencies. The scanner is one Python file, standard library only, and it makes no network calls. You can also run it without an agent at all:
 

@@ -58,10 +58,14 @@ TEXT_SUFFIXES = {
 }
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".mypy_cache"}
 MAX_BYTES = 2_000_000
-# No reviewable line is this long. Matching is capped here so a hostile skill
-# cannot hand the regex engine a 50 KB line and stall the scan; the line is
-# still reported, because an unreadable line is itself worth knowing about.
+# No reviewable line is this long. A single regex call is bounded to this many
+# characters so a hostile skill cannot hand the engine a 50 KB line and stall
+# the scan. Longer lines are matched in overlapping windows rather than
+# truncated: truncating would let a line pad past the limit and hide the real
+# payload behind the very guard that exists to protect the scan. The overlap
+# is wider than any pattern can span, so nothing falls between two windows.
 MAX_LINE = 2_000
+WINDOW_OVERLAP = 400
 
 # A detached signature or an attestation. A certificate or a public key is not
 # one: shipping cosign.pub proves nothing was signed, only that someone has a
@@ -396,13 +400,40 @@ def scan(root: Path, rules: dict) -> dict:
     }
 
 
+class _Hit:
+    """Reports a match position in the original line, not in the window."""
+
+    __slots__ = ("_start",)
+
+    def __init__(self, start: int):
+        self._start = start
+
+    def start(self) -> int:
+        return self._start
+
+
+def search_bounded(pattern: re.Pattern, line: str):
+    """Search the whole line without ever handing the engine an unbounded one.
+
+    Truncating instead would let a hostile line pad past the limit and hide its
+    payload behind the guard that exists to keep the scan fast.
+    """
+    if len(line) <= MAX_LINE:
+        return pattern.search(line)
+    step = MAX_LINE - WINDOW_OVERLAP
+    for offset in range(0, len(line), step):
+        found = pattern.search(line[offset : offset + MAX_LINE])
+        if found:
+            return _Hit(offset + found.start())
+    return None
+
+
 def match_lines(
     pattern: re.Pattern, lines: list[str], mask: list[bool], cap: int = 3, negation_safe: bool = False
 ) -> list[dict]:
     hits = []
-    for index, raw_line in enumerate(lines):
-        line = raw_line if len(raw_line) <= MAX_LINE else raw_line[:MAX_LINE]
-        match = pattern.search(line)
+    for index, line in enumerate(lines):
+        match = search_bounded(pattern, line)
         if not match:
             continue
         if negation_safe and NEGATION_RE.search(line[: match.start()]):

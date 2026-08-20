@@ -286,6 +286,101 @@ class Cli(unittest.TestCase):
             self.assertFalse(payload["drift"])
 
 
+class HostileInput(unittest.TestCase):
+    """A skill gets to choose its own bytes, so the scanner is an attack surface."""
+
+    def test_no_regex_takes_longer_than_a_moment(self):
+        """PRIV-LLM-KEY once took 18 seconds on one 50 KB line."""
+        import time
+
+        probes = [
+            "A" * 50_000,
+            "a" * 20_000,
+            "curl " + "x " * 4_000 + "| sh",
+            "`" * 20_000,
+            "https://" + "a." * 8_000,
+            " " * 50_000 + "sudo",
+            "cat " + "y" * 20_000,
+            "$(" * 5_000 + ")" * 5_000,
+            "." * 50_000,
+        ]
+        for entry in RULES["legs"] + RULES["rules"]:
+            if entry["_re"] is None:
+                continue
+            for probe in probes:
+                started = time.perf_counter()
+                scan.match_lines(entry["_re"], [probe], mask=[True])
+                elapsed = time.perf_counter() - started
+                self.assertLess(elapsed, 0.5, f"{entry['id']} took {elapsed:.2f}s")
+
+    def test_llm_key_rule_still_matches_real_keys(self):
+        pattern = next(e for e in RULES["legs"] if e["id"] == "PRIV-LLM-KEY")["_re"]
+        for line in ("export ANTHROPIC_API_KEY=x", "MY_SERVICE_SECRET", "STRIPE_SECRET", "OPENAI_API_KEY"):
+            self.assertTrue(pattern.search(line), line)
+
+    def test_symlink_out_of_the_tree_is_not_followed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "skill"
+            root.mkdir()
+            (root / "SKILL.md").write_text("# hi\n", encoding="utf-8")
+            outside = Path(tmp) / "secrets.md"
+            outside.write_text("AWS_SECRET_ACCESS_KEY=hunter2\n", encoding="utf-8")
+            try:
+                (root / "notes.md").symlink_to(outside)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks unavailable on this platform")
+
+            report = scan.scan(root, RULES)
+            report["verdict"] = scan.decide(report)
+
+            self.assertIn("LINK-ESCAPES-TREE", rule_ids(report))
+            self.assertEqual(report["verdict"], "stop")
+            # The secret must not appear anywhere in the report.
+            self.assertNotIn("hunter2", json.dumps(report))
+            self.assertEqual(report["files_scanned"], 1)
+
+    def test_symlink_is_hashed_by_its_target_so_retargeting_is_drift(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "skill"
+            root.mkdir()
+            (root / "SKILL.md").write_text("# hi\n", encoding="utf-8")
+            (root / "a.md").write_text("a\n", encoding="utf-8")
+            (root / "b.md").write_text("b\n", encoding="utf-8")
+            try:
+                (root / "link.md").symlink_to(root / "a.md")
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks unavailable on this platform")
+
+            report = scan.scan(root, RULES)
+            report["verdict"] = scan.decide(report)
+            scan.write_lock(root, report)
+
+            (root / "link.md").unlink()
+            (root / "link.md").symlink_to(root / "b.md")
+            code, message = scan.check_lock(root, scan.scan(root, RULES))
+            self.assertEqual(code, 1)
+            self.assertIn("link.md", message)
+
+    def test_a_very_long_line_is_reported_and_does_not_hang(self):
+        report = report_for("x" * 50_000 + "\n")
+        self.assertIn("OBFUS-LONG-LINE", rule_ids(report))
+
+    def test_symlinked_directory_is_not_walked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "skill"
+            (root / "sub").mkdir(parents=True)
+            (root / "SKILL.md").write_text("# hi\n", encoding="utf-8")
+            try:
+                (root / "loop").symlink_to(root)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks unavailable on this platform")
+            report = scan.scan(root, RULES)  # must terminate
+            # It points at the root, which does not escape the tree, so it is
+            # the milder finding. The property under test is that the walk ends.
+            self.assertIn("LINK-PRESENT", rule_ids(report))
+            self.assertEqual(report["files_scanned"], 1)
+
+
 class PluginManifests(unittest.TestCase):
     """Name, version and description live in three files. Keep them one truth."""
 
@@ -350,7 +445,9 @@ class RuleFile(unittest.TestCase):
         raw = json.loads((ROOT / "rules" / "rules.json").read_text(encoding="utf-8"))
         critical = {e["id"] for e in raw["rules"] if e["severity"] == "critical"}
         fired = rule_ids(scan.scan(ROOT / "examples" / "evil-skill", RULES))
-        covered_elsewhere = {"RCE-EVAL-REMOTE", "OBFUS-BASE64-EXEC"}
+        # Each of these has its own test below or in HostileInput. Adding an id
+        # here without adding a test defeats the point of the check.
+        covered_elsewhere = {"RCE-EVAL-REMOTE", "OBFUS-BASE64-EXEC", "LINK-ESCAPES-TREE"}
         self.assertEqual(critical - fired - covered_elsewhere, set())
 
     def test_rules_covered_elsewhere_actually_fire(self):

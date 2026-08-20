@@ -29,7 +29,7 @@
     {
       "id": "PRIV-LLM-KEY",
       "leg": "private",
-      "pattern": "ANTHROPIC_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY|GROQ_API_KEY|OPENROUTER_API_KEY|[A-Z0-9_]*_API_KEY|[A-Z0-9_]*_SECRET\\b",
+      "pattern": "\\b(ANTHROPIC|OPENAI|GEMINI|GROQ|OPENROUTER|HUGGINGFACE|COHERE|MISTRAL)_API_KEY\\b|\\b[A-Z0-9]{1,20}(_[A-Z0-9]{1,20}){0,3}_(API_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN)\\b",
       "title": "reads API keys"
     },
     {
@@ -281,6 +281,27 @@
       "pattern": null,
       "title": "a file was too large to read",
       "why": "It is hashed and covered by --check, but no rule has looked inside it. Read it yourself or ask why a skill ships a file that big."
+    },
+    {
+      "id": "LINK-ESCAPES-TREE",
+      "severity": "critical",
+      "pattern": null,
+      "title": "a symlink points outside the skill",
+      "why": "Whatever reads this skill reads that file instead. It is not followed here, and it should not be followed by your agent either."
+    },
+    {
+      "id": "LINK-PRESENT",
+      "severity": "medium",
+      "pattern": null,
+      "title": "the skill contains a symlink",
+      "why": "It stays inside the skill, but a link is an indirection that review tends to skip. It is hashed by its target path, so retargeting it shows up as drift."
+    },
+    {
+      "id": "OBFUS-LONG-LINE",
+      "severity": "high",
+      "pattern": null,
+      "title": "a line is too long to review or to match in full",
+      "why": "Real code and real prose do not run to thousands of characters on one line. Matching stops at 2000; read the rest yourself."
     }
   ],
   "host_allowlist": [

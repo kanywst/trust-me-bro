@@ -1,0 +1,17 @@
+{
+  // Checked in so CI, contributors and the author lint the same way. Without
+  // it the action falls back to defaults and fails on prose that is fine.
+  "config": {
+    "default": true,
+    // Paragraphs are one line each. Hard-wrapping at 80 puts breaks mid
+    // sentence and makes every reword a multi-line diff.
+    "MD013": false,
+    // The rule file and the README both document the same rule IDs, so
+    // headings repeat on purpose.
+    "MD024": false,
+    "MD033": { "allowed_elements": ["picture", "source", "img"] },
+    "MD036": false,
+    "MD041": false,
+    "MD060": false
+  }
+}

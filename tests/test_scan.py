@@ -286,6 +286,40 @@ class Cli(unittest.TestCase):
             self.assertFalse(payload["drift"])
 
 
+class PluginManifests(unittest.TestCase):
+    """Name, version and description live in three files. Keep them one truth."""
+
+    def setUp(self):
+        self.plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+        self.market = market
+        self.entry = market["plugins"][0]
+
+    def test_names_agree_with_the_skill(self):
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("\nname: trust-me-bro\n", skill)
+        self.assertEqual(self.plugin["name"], "trust-me-bro")
+        self.assertEqual(self.entry["name"], "trust-me-bro")
+
+    def test_versions_agree(self):
+        self.assertEqual(self.plugin["version"], self.entry["version"])
+        self.assertEqual(self.plugin["version"], self.market["metadata"]["version"])
+
+    def test_descriptions_agree(self):
+        self.assertEqual(self.plugin["description"], self.entry["description"])
+
+    def test_category_is_not_in_plugin_json(self):
+        """`claude plugin validate --strict` rejects it there; it belongs to the entry."""
+        self.assertNotIn("category", self.plugin)
+        self.assertEqual(self.entry["category"], "security")
+
+    def test_root_skill_layout_is_intact(self):
+        """A single root SKILL.md only works as a plugin while there is no skills/ dir."""
+        self.assertTrue((ROOT / "SKILL.md").is_file())
+        self.assertFalse((ROOT / "skills").exists())
+        self.assertNotIn("skills", self.plugin)
+
+
 class RuleFile(unittest.TestCase):
     """The rule file is data, so it gets checked like data."""
 

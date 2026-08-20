@@ -43,7 +43,14 @@ Nobody reads it.
 
 ## Install
 
-Drop the folder into wherever your agent keeps skills.
+In Claude Code, as a plugin:
+
+```bash
+/plugin marketplace add kanywst/trust-me-bro
+/plugin install trust-me-bro@trust-me-bro
+```
+
+Anywhere else, drop the folder into wherever your agent keeps skills:
 
 ```bash
 git clone --depth 1 https://github.com/kanywst/trust-me-bro
@@ -57,6 +64,15 @@ git clone --depth 1 https://github.com/kanywst/trust-me-bro
 | Copilot / Gemini CLI | whatever your skills directory is |
 
 Then just say "I'm about to install this skill" and it triggers.
+
+Yes, you should audit this one too. The two things you are installing are `SKILL.md` and `scripts/scan.py`, and both come out clean:
+
+```bash
+python3 trust-me-bro/scripts/scan.py trust-me-bro/SKILL.md
+python3 trust-me-bro/scripts/scan.py trust-me-bro/scripts
+```
+
+Point it at the whole repository instead and it says **STOP**, because the repository ships `examples/evil-skill/` and a test suite full of attack strings. That is the tool being right about the text in front of it and wrong about what the text is for, which is the exact limitation the rest of this README is about. It is a scanner, not a mind reader.
 
 No dependencies. The scanner is one Python file, standard library only, and it makes no network calls. You can also run it without an agent at all:
 

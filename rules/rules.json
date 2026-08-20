@@ -1,0 +1,293 @@
+{
+  "version": 1,
+  "notes": "Patterns are Python re, matched case-insensitively per line unless 'cs' is true. 'leg' entries feed the lethal-trifecta verdict. Standalone rules carry their own severity. 'negation_safe' rules are suppressed when the words just before the match negate them, so a skill that says \"never use sudo\" is not reported for using sudo.",
+  "legs": [
+    {
+      "id": "PRIV-DOTENV",
+      "leg": "private",
+      "pattern": "(^|[^a-z0-9_.-])\\.env(\\.[a-z]+)?\\b|\\bdotenv\\b|load_dotenv",
+      "title": "reads .env files"
+    },
+    {
+      "id": "PRIV-SSH",
+      "leg": "private",
+      "pattern": "~/\\.ssh|\\bid_rsa\\b|\\bid_ed25519\\b|ssh-agent|known_hosts",
+      "title": "reads SSH keys"
+    },
+    {
+      "id": "PRIV-CLOUD-CREDS",
+      "leg": "private",
+      "pattern": "\\.aws/credentials|\\.kube/config|\\.docker/config\\.json|gcloud auth|azure/credentials|AWS_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID",
+      "title": "reads cloud credentials"
+    },
+    {
+      "id": "PRIV-VCS-TOKEN",
+      "leg": "private",
+      "pattern": "gh auth token|GITHUB_TOKEN|GH_TOKEN|\\.git-credentials|\\.netrc|\\.npmrc|\\.pypirc|GITLAB_TOKEN",
+      "title": "reads VCS or registry tokens"
+    },
+    {
+      "id": "PRIV-LLM-KEY",
+      "leg": "private",
+      "pattern": "ANTHROPIC_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY|GROQ_API_KEY|OPENROUTER_API_KEY|[A-Z0-9_]*_API_KEY|[A-Z0-9_]*_SECRET\\b",
+      "title": "reads API keys"
+    },
+    {
+      "id": "PRIV-ENV-DUMP",
+      "leg": "private",
+      "pattern": "\\bprintenv\\b|\\benv \\||os\\.environ(?!\\.get\\(\"?[A-Z_]*(PATH|HOME|LANG|TERM|PWD))|process\\.env\\b|\\$\\{?ENV\\b",
+      "title": "reads the whole environment"
+    },
+    {
+      "id": "PRIV-KEYCHAIN",
+      "leg": "private",
+      "pattern": "security find-generic-password|security find-internet-password|libsecret|secret-tool|Windows Credential Manager|wincred",
+      "title": "reads the OS keychain"
+    },
+    {
+      "id": "PRIV-AGENT-CONFIG",
+      "leg": "private",
+      "pattern": "~/\\.claude(/|\\b)|~/\\.codex(/|\\b)|~/\\.cursor(/|\\b)|~/\\.gemini(/|\\b)|~/\\.config/github-copilot|\\.mcp\\.json|settings\\.local\\.json",
+      "title": "reads your agent's own config"
+    },
+    {
+      "id": "PRIV-BROWSER-STORE",
+      "leg": "private",
+      "pattern": "Cookies\\.sqlite|Login Data|cookies\\.sqlite|Local State|chrome/User Data|browser_cookies|storageState",
+      "title": "reads browser cookie or password stores"
+    },
+    {
+      "id": "PRIV-WALLET",
+      "leg": "private",
+      "pattern": "\\.ethereum/keystore|wallet\\.dat|mnemonic|seed phrase|private[ _-]?key",
+      "title": "reads wallet or private-key material"
+    },
+    {
+      "id": "UNTR-WEBFETCH",
+      "leg": "untrusted",
+      "pattern": "\\bWebFetch\\b|\\bWebSearch\\b|\\bfetch_url\\b|browser_navigate",
+      "title": "pulls in web pages"
+    },
+    {
+      "id": "UNTR-HTTP-GET",
+      "leg": "untrusted",
+      "pattern": "\\bcurl\\s+(-[a-zA-Z]+\\s+)*https?://|\\bwget\\s+https?://|requests\\.get\\(|urllib\\.request\\.urlopen\\(|axios\\.get\\(|httpx\\.get\\(",
+      "title": "downloads remote content"
+    },
+    {
+      "id": "UNTR-BROWSER",
+      "leg": "untrusted",
+      "pattern": "\\bplaywright\\b|\\bpuppeteer\\b|\\bselenium\\b|chromedriver|headless chrome|scrapling|beautifulsoup|\\bcheerio\\b",
+      "title": "drives a browser or scrapes pages"
+    },
+    {
+      "id": "UNTR-ISSUE-BODY",
+      "leg": "untrusted",
+      "pattern": "gh issue (view|list)|gh pr (view|diff)|issue\\.body|pull_request\\.body|review comments|\\bIMAP\\b|gmail|inbox",
+      "title": "reads issue, PR, or mail bodies written by other people"
+    },
+    {
+      "id": "UNTR-FEED",
+      "leg": "untrusted",
+      "pattern": "\\brss\\b|atom feed|feedparser|reddit\\.com|news\\.ycombinator|x\\.com/|twitter\\.com/",
+      "title": "ingests feeds or social content"
+    },
+    {
+      "id": "EXFIL-HTTP-POST",
+      "leg": "exfil",
+      "pattern": "curl\\s[^\\n]*(-X\\s*(POST|PUT|PATCH)|--data|-d\\s|-F\\s|--upload-file)|requests\\.(post|put|patch)\\(|axios\\.(post|put|patch)\\(|httpx\\.(post|put)\\(|method:\\s*[\"']POST",
+      "title": "sends data out over HTTP"
+    },
+    {
+      "id": "EXFIL-WEBHOOK",
+      "leg": "exfil",
+      "pattern": "hooks\\.slack\\.com|discord(app)?\\.com/api/webhooks|api\\.telegram\\.org|webhook\\.site|\\bwebhook_url\\b|ntfy\\.sh|pipedream\\.net",
+      "title": "posts to a webhook"
+    },
+    {
+      "id": "EXFIL-VCS-WRITE",
+      "leg": "exfil",
+      "pattern": "git push|gh gist create|gh release upload|gh api\\s[^\\n]*-X\\s*(POST|PUT|PATCH)|gh (issue|pr) (create|comment)",
+      "title": "writes to a remote repository or gist"
+    },
+    {
+      "id": "EXFIL-MAIL",
+      "leg": "exfil",
+      "pattern": "\\bsmtplib\\b|\\bsendmail\\b|nodemailer|\\bmailto:|ses\\.send_email|resend\\.emails",
+      "title": "sends mail"
+    },
+    {
+      "id": "EXFIL-DNS",
+      "leg": "exfil",
+      "pattern": "(dig|nslookup|host)\\s+[^\\n]*\\$\\(|\\.oast\\.|\\.burpcollaborator\\.|interact\\.sh|\\.dnslog\\.",
+      "title": "leaks over DNS"
+    },
+    {
+      "id": "EXFIL-CLOUD-PUT",
+      "leg": "exfil",
+      "pattern": "aws s3 cp|s3\\.upload|gsutil cp|az storage blob upload|\\bscp\\s|\\brsync\\s[^\\n]*::?",
+      "title": "uploads to remote storage"
+    }
+  ],
+  "rules": [
+    {
+      "id": "RCE-PIPE-SHELL",
+      "severity": "critical",
+      "negation_safe": true,
+      "pattern": "(curl|wget)\\s[^\\n|]*(https?://|\\$\\{?[A-Za-z_])[^\\n|]*\\|\\s*(sudo\\s+)?((ba|z|k)?sh|python[0-9.]*|node|ruby|perl)\\b|iex\\s*\\(\\s*new-object",
+      "title": "downloads a remote script and executes it",
+      "why": "The code that actually runs is whatever that URL serves at the moment you run it. Nothing you review here binds it.",
+      "prose_is_code": true
+    },
+    {
+      "id": "RCE-EVAL-REMOTE",
+      "severity": "critical",
+      "pattern": "eval\\s*[\"'`(]?\\s*\\$\\(\\s*(curl|wget)|exec\\s*\\(\\s*requests\\.get|subprocess[^\\n]*shell\\s*=\\s*True[^\\n]*(curl|wget)",
+      "title": "evaluates remotely fetched text as code",
+      "why": "Same as piping to a shell, with an extra layer to make review harder.",
+      "prose_is_code": true
+    },
+    {
+      "id": "OBFUS-BASE64-EXEC",
+      "severity": "critical",
+      "pattern": "base64\\s+(-[dD]|--decode)[^\\n]*\\|\\s*(ba|z)?sh|b64decode\\([^\\n]*\\)\\s*\\)?\\s*(\\)|,)?\\s*$|atob\\([^\\n]*\\)\\s*\\)|codecs\\.decode\\([^\\n]*rot",
+      "title": "decodes an encoded blob and runs it",
+      "why": "Encoding exists here only to stop a human from reading it.",
+      "prose_is_code": true
+    },
+    {
+      "id": "OBFUS-LONG-BLOB",
+      "severity": "high",
+      "pattern": "[A-Za-z0-9+/]{220,}={0,2}",
+      "cs": true,
+      "title": "contains a long opaque encoded blob",
+      "why": "Nobody can review 220+ characters of base64 by eye. Ask what it is before you install."
+    },
+    {
+      "id": "OBFUS-ENCODED-SECRETS",
+      "severity": "critical",
+      "negation_safe": true,
+      "pattern": "\\$\\((cat|printenv|env|echo \\$)[^)]{0,60}\\)[^\\n]{0,20}base64|(cat|printenv|env)[^\\n|]{0,60}\\|\\s*(base64|xxd|openssl enc|gzip)",
+      "title": "encodes local files or environment before sending them",
+      "why": "Encoding on the way out is not compression, it is packaging for transport.",
+      "prose_is_code": true
+    },
+    {
+      "id": "INJ-IGNORE-INSTRUCTIONS",
+      "severity": "critical",
+      "pattern": "ignore (all )?(previous|prior|earlier|above) (instructions|rules|prompts)|disregard (the )?(previous|system|user)|override (the )?system prompt",
+      "title": "tells the agent to ignore its previous instructions",
+      "why": "A skill is instructions. A skill that overrides your instructions is an injection you installed on purpose.",
+      "prose_is_code": true
+    },
+    {
+      "id": "INJ-HIDE-FROM-USER",
+      "severity": "critical",
+      "pattern": "(do not|don't|never) (tell|inform|mention|show|reveal|notify|surface|disclose)[^\\n]{0,40}(user|human|operator)|without (telling|informing|asking) the (user|human)|do not mention this (skill|file|step)|silently (send|upload|post|delete|run)|keep this (secret|hidden|between us)",
+      "title": "tells the agent to hide something from you",
+      "why": "There is no legitimate reason for a skill to withhold its own behaviour from the person running it.",
+      "prose_is_code": true
+    },
+    {
+      "id": "INJ-NO-CONFIRM",
+      "severity": "high",
+      "pattern": "(do not|don't|never) (ask|prompt|request)[^\\n]{0,20}(permission|confirmation|approval)|skip (the )?(permission|confirmation)[^\\n]{0,12}(prompt|check|step|dialog)|auto[- ]?approve|without (asking|prompting|informing) the (user|human|operator)",
+      "title": "tells the agent to skip asking you",
+      "why": "Removing the confirmation step removes the only place a bad action gets caught.",
+      "prose_is_code": true
+    },
+    {
+      "id": "PERM-DANGEROUS-FLAG",
+      "severity": "critical",
+      "pattern": "--dangerously-skip-permissions|--yolo\\b|bypassPermissions|DANGEROUSLY_|--no-sandbox|acceptEdits.*\\*",
+      "title": "disables the agent's permission system",
+      "why": "This turns off the containment that is supposed to survive a prompt injection.",
+      "prose_is_code": true
+    },
+    {
+      "id": "PERM-WILDCARD-BASH",
+      "severity": "high",
+      "pattern": "Bash\\(\\s*\\*\\s*\\)|\"Bash\\(.*:\\*\\)\"|allow[^\\n]*\\[\\s*\"\\*\"|\"allowedTools\"\\s*:\\s*\\[\\s*\"\\*\"",
+      "title": "requests unrestricted shell access",
+      "why": "Every other control in this list is downstream of this one."
+    },
+    {
+      "id": "PERSIST-AGENT-CONFIG-WRITE",
+      "severity": "critical",
+      "negation_safe": true,
+      "pattern": "(>|>>|write|tee|json\\.dump|writeFileSync)[^\\n]*(~/\\.claude/settings|~/\\.codex/config|\\.mcp\\.json|settings\\.local\\.json|CLAUDE\\.md|AGENTS\\.md)|hooks[\"']?\\s*:\\s*\\{[^\\n]*(command|Bash)",
+      "title": "writes to your agent's config or installs a hook",
+      "why": "This outlives the session. Deleting the skill does not remove it.",
+      "prose_is_code": true
+    },
+    {
+      "id": "PERSIST-SHELL-PROFILE",
+      "severity": "critical",
+      "negation_safe": true,
+      "pattern": "(>>|tee -a)[^\\n]*(\\.zshrc|\\.bashrc|\\.bash_profile|\\.profile|\\.zprofile)|crontab\\s+(-[er]\\b|-\\s*$)|\\|\\s*crontab\\b|launchctl (load|bootstrap)|systemctl enable",
+      "title": "installs itself into your shell or a scheduler",
+      "why": "Persistence outside the agent entirely.",
+      "prose_is_code": true
+    },
+    {
+      "id": "INSTALL-AT-RUNTIME",
+      "severity": "high",
+      "negation_safe": true,
+      "pattern": "\\b(pip[0-9.]*|uv pip) install\\b|npm i(nstall)? -g|\\bnpx -y\\b|\\bbunx\\b|cargo install|go install|brew install",
+      "title": "installs software when it runs",
+      "why": "The dependency tree you get is resolved at run time, not at review time."
+    },
+    {
+      "id": "DESTRUCTIVE",
+      "severity": "high",
+      "negation_safe": true,
+      "pattern": "rm\\s+-[a-zA-Z]*[rf][a-zA-Z]*\\s+[~/$]|DROP TABLE|dd\\s+if=|mkfs\\.|git push --force(?!-with-lease)",
+      "title": "runs destructive commands",
+      "why": "Blast radius if anything upstream goes wrong."
+    },
+    {
+      "id": "PRIVILEGE-SUDO",
+      "severity": "medium",
+      "negation_safe": true,
+      "pattern": "\\bsudo\\b|\\bdoas\\b|Start-Process[^\\n]*-Verb\\s+RunAs",
+      "title": "asks for root",
+      "why": "Anything that goes wrong past this line goes wrong as root."
+    },
+    {
+      "id": "WORKTREE-RESET",
+      "severity": "medium",
+      "negation_safe": true,
+      "pattern": "git (reset --hard|clean -[a-z]*f|checkout -- \\.)",
+      "title": "throws away uncommitted work",
+      "why": "Recoverable only if you had committed. Often shows up in \"recovery\" instructions."
+    },
+    {
+      "id": "SUPPLY-UNPINNED-SOURCE",
+      "severity": "medium",
+      "pattern": "raw\\.githubusercontent\\.com/[^\\n]*/(main|master|HEAD)/|github\\.com/[^\\n]*/archive/refs/heads/|@latest\\b|:latest\\b",
+      "title": "pulls from a moving reference instead of a pinned commit",
+      "why": "What you reviewed and what runs tomorrow are different files."
+    },
+    {
+      "id": "META-NO-ALLOWED-TOOLS",
+      "severity": "low",
+      "pattern": null,
+      "title": "declares no allowed-tools",
+      "why": "The field is optional in the Agent Skills spec, so most skills omit it. It means the runtime, not the skill, decides what it can reach."
+    }
+  ],
+  "host_allowlist": [
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+    "example.com",
+    "example.org",
+    "json-schema.org",
+    "www.w3.org",
+    "schema.org",
+    "spdx.org",
+    "opensource.org",
+    "developer.mozilla.org",
+    "docs.python.org"
+  ]
+}

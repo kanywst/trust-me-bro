@@ -274,6 +274,13 @@
       "pattern": null,
       "title": "declares no allowed-tools",
       "why": "The field is optional in the Agent Skills spec, so most skills omit it. It means the runtime, not the skill, decides what it can reach."
+    },
+    {
+      "id": "SCAN-TOO-LARGE",
+      "severity": "high",
+      "pattern": null,
+      "title": "a file was too large to read",
+      "why": "It is hashed and covered by --check, but no rule has looked inside it. Read it yourself or ask why a skill ships a file that big."
     }
   ],
   "host_allowlist": [

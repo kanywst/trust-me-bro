@@ -24,21 +24,68 @@ LOCK_NAME = ".trustmebro.lock"
 IGNORE_NAME = ".trustmebro.ignore"
 
 TEXT_SUFFIXES = {
-    ".md", ".markdown", ".txt", ".py", ".sh", ".bash", ".zsh", ".fish",
-    ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".json", ".jsonc",
-    ".yaml", ".yml", ".toml", ".rb", ".go", ".rs", ".ps1", ".bat", ".cmd",
-    ".env", ".cfg", ".ini", ".conf", ".xml", ".html",
+    ".md",
+    ".markdown",
+    ".txt",
+    ".py",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".fish",
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".json",
+    ".jsonc",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".rb",
+    ".go",
+    ".rs",
+    ".ps1",
+    ".bat",
+    ".cmd",
+    ".env",
+    ".cfg",
+    ".ini",
+    ".conf",
+    ".xml",
+    ".html",
 }
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".mypy_cache"}
 MAX_BYTES = 2_000_000
 
-SIGNATURE_GLOBS = ["*.sig", "*.asc", "*.pem", "*.bundle", "*.intoto.jsonl", "*.sigstore", "cosign.pub", "*.att"]
-MANIFEST_NAMES = {"manifest.yaml", "manifest.yml", "manifest.json", "sha256sums", "sha256sum.txt", "checksums.txt", LOCK_NAME}
+# A detached signature or an attestation. A certificate or a public key is not
+# one: shipping cosign.pub proves nothing was signed, only that someone has a
+# key. Reporting that as "signed" would be a false assurance from a tool whose
+# entire job is to not give false assurances.
+SIGNATURE_SUFFIXES = {".sig", ".asc", ".sigstore", ".att"}
+SIGNATURE_NAMES = {"signature", "signatures"}
+ATTESTATION_PARTS = (".intoto.jsonl", ".sigstore.json", ".dsse.json", ".provenance.json")
+KEY_MATERIAL_SUFFIXES = {".pem", ".pub", ".crt", ".cer"}
+MANIFEST_NAMES = {
+    "manifest.yaml",
+    "manifest.yml",
+    "manifest.json",
+    "sha256sums",
+    "sha256sum.txt",
+    "checksums.txt",
+    "sha256sums.txt",
+    LOCK_NAME,
+}
+SHA256_RE = re.compile(r"\b[0-9a-f]{64}\b")
 
 URL_RE = re.compile(r"https?://([a-zA-Z0-9._-]+)")
 # "Never use sudo" should not be reported as using sudo. Applied only to rules
 # marked negation_safe, because some rules are themselves about negative phrasing.
-NEGATION_RE = re.compile(r"\b(never|do not|don't|dont|avoid|refuse to|must not|no need to|instead of|rather than|without)\b[^.;]{0,40}$", re.IGNORECASE)
+NEGATION_RE = re.compile(
+    r"\b(never|do not|don't|dont|avoid|refuse to|must not|no need to|instead of|rather than|without)\b[^.;]{0,40}$",
+    re.IGNORECASE,
+)
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 LEG_LABEL = {
     "private": "private data",
@@ -48,6 +95,7 @@ LEG_LABEL = {
 
 
 # ---------------------------------------------------------------- collection
+
 
 def load_rules(path: Path = RULES_PATH) -> dict:
     with path.open(encoding="utf-8") as fh:
@@ -59,6 +107,11 @@ def load_rules(path: Path = RULES_PATH) -> dict:
 
 
 def iter_files(root: Path):
+    """Every file in the target, including binaries. Filtering happens later.
+
+    The lock has to cover files the rules cannot read, or swapping a binary
+    payload would slip past --check.
+    """
     if root.is_file():
         yield root
         return
@@ -66,19 +119,38 @@ def iter_files(root: Path):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for name in sorted(filenames):
             path = Path(dirpath) / name
-            if path.resolve() == RULES_PATH or name in (LOCK_NAME, IGNORE_NAME):
+            if name in (LOCK_NAME, IGNORE_NAME):
                 continue  # the detector's own bookkeeping is not a target
-            if path.suffix.lower() in TEXT_SUFFIXES or name.lower() in MANIFEST_NAMES or not path.suffix:
-                yield path
+            try:
+                if path.resolve() == RULES_PATH:
+                    continue
+            except OSError:
+                continue
+            yield path
+
+
+def is_readable_text(path: Path) -> bool:
+    name = path.name.lower()
+    return path.suffix.lower() in TEXT_SUFFIXES or name in MANIFEST_NAMES or not path.suffix
 
 
 def read_text(path: Path) -> str | None:
     try:
-        if path.stat().st_size > MAX_BYTES:
-            return None
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
+
+
+def digest_of(path: Path) -> str | None:
+    """Hash the bytes on disk, not a decoded copy of them."""
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
 
 
 def trim(line: str, limit: int = 120) -> str:
@@ -131,81 +203,143 @@ def demote(severity: str) -> str:
     return DEMOTE[severity]
 
 
-def scan(root: Path, rules: dict) -> dict:
-    findings: list[dict] = []
-    mentions: list[dict] = []
-    legs: dict[str, list[dict]] = {"private": [], "untrusted": [], "exfil": []}
-    hosts: dict[str, int] = {}
-    digests: dict[str, str] = {}
-    seen_allowed_tools = False
-    scanned = 0
+def relative_name(root: Path, path: Path) -> str:
+    if not root.is_dir():
+        return path.name
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
 
-    allowlist = set(rules["host_allowlist"])
 
-    for path in iter_files(root):
-        text = read_text(path)
-        if text is None:
+def scan_text(rel: str, path: Path, text: str, rules: dict) -> dict:
+    """Everything one readable file contributes. No aggregation, no policy."""
+    findings, mentions = [], []
+    legs = {"private": [], "untrusted": [], "exfil": []}
+
+    lines = text.splitlines()
+    mask = code_mask(path, lines)
+
+    for entry in rules["legs"]:
+        # Legs are capability claims, so "never read ~/.ssh" is not a claim.
+        hits = match_lines(entry["_re"], lines, mask=mask, negation_safe=True)
+        code_hits = [h for h in hits if h["context"] == "code"]
+        record = {"id": entry["id"], "title": entry["title"], "file": rel}
+        if code_hits:
+            legs[entry["leg"]].append({**record, "hits": code_hits})
+        elif hits:
+            mentions.append({**record, "hits": hits[:1]})
+
+    for entry in rules["rules"]:
+        if entry["_re"] is None:
             continue
-        scanned += 1
-        rel = str(path.relative_to(root)) if root.is_dir() else path.name
-        digests[rel] = hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
-
-        if re.search(r"^\s*allowed[-_]tools\s*:", text, re.IGNORECASE | re.MULTILINE):
-            seen_allowed_tools = True
-
-        for host in URL_RE.findall(text):
-            if host not in allowlist:
-                hosts[host] = hosts.get(host, 0) + 1
-
-        lines = text.splitlines()
-        mask = code_mask(path, lines)
-
-        for entry in rules["legs"]:
-            # Legs are capability claims, so "never read ~/.ssh" is not a claim.
-            hits = match_lines(entry["_re"], lines, mask=mask, negation_safe=True)
-            code_hits = [h for h in hits if h["context"] == "code"]
-            if code_hits:
-                legs[entry["leg"]].append({"id": entry["id"], "title": entry["title"], "file": rel, "hits": code_hits})
-            elif hits:
-                mentions.append({"id": entry["id"], "title": entry["title"], "file": rel, "hits": hits[:1]})
-
-        for entry in rules["rules"]:
-            if entry["_re"] is None:
-                continue
-            hits = match_lines(entry["_re"], lines, mask=mask, negation_safe=entry.get("negation_safe", False))
-            if not hits:
-                continue
-            # For injection and permission rules the prose *is* the payload: a
-            # skill is instructions, so a sentence aimed at the agent runs.
-            prose_only = not entry.get("prose_is_code") and all(h["context"] == "prose" for h in hits)
-            findings.append({
+        hits = match_lines(entry["_re"], lines, mask=mask, negation_safe=entry.get("negation_safe", False))
+        if not hits:
+            continue
+        # For injection and permission rules the prose *is* the payload: a
+        # skill is instructions, so a sentence aimed at the agent runs.
+        prose_only = not entry.get("prose_is_code") and all(h["context"] == "prose" for h in hits)
+        findings.append(
+            {
                 "id": entry["id"],
                 "severity": demote(entry["severity"]) if prose_only else entry["severity"],
                 "title": entry["title"] + (" (described, not run)" if prose_only else ""),
                 "why": entry["why"],
                 "file": rel,
                 "hits": hits,
-            })
+            }
+        )
 
-    if not seen_allowed_tools and scanned:
-        meta = next(e for e in rules["rules"] if e["id"] == "META-NO-ALLOWED-TOOLS")
-        findings.append({
-            "id": meta["id"], "severity": meta["severity"], "title": meta["title"],
-            "why": meta["why"], "file": "-", "hits": [],
-        })
+    return {
+        "findings": findings,
+        "mentions": mentions,
+        "legs": legs,
+        "declares_allowed_tools": bool(re.search(r"^\s*allowed[-_]tools\s*:", text, re.IGNORECASE | re.MULTILINE)),
+        "hosts": URL_RE.findall(text),
+    }
+
+
+def synthetic(rules: dict, rule_id: str, file: str = "-", extra: str = "") -> dict:
+    entry = next((e for e in rules["rules"] if e["id"] == rule_id), None)
+    if entry is None:
+        return {}
+    return {
+        "id": entry["id"],
+        "severity": entry["severity"],
+        "title": entry["title"] + extra,
+        "why": entry["why"],
+        "file": file,
+        "hits": [],
+    }
+
+
+def scan(root: Path, rules: dict) -> dict:
+    findings: list[dict] = []
+    mentions: list[dict] = []
+    legs: dict[str, list[dict]] = {"private": [], "untrusted": [], "exfil": []}
+    hosts: dict[str, int] = {}
+    digests: dict[str, str] = {}
+    unread: list[str] = []
+    declares_allowed_tools = False
+    scanned = 0
+
+    allowlist = set(rules["host_allowlist"])
+
+    for path in iter_files(root):
+        rel = relative_name(root, path)
+
+        # Hash first and unconditionally. A file the rules cannot read is
+        # exactly the file an attacker would put a payload in, so --check has
+        # to cover it even when --scan cannot.
+        digest = digest_of(path)
+        if digest is None:
+            continue
+        digests[rel] = digest
+
+        try:
+            oversized = path.stat().st_size > MAX_BYTES
+        except OSError:
+            continue
+        if not is_readable_text(path) or oversized:
+            if oversized:
+                unread.append(rel)
+            continue
+
+        text = read_text(path)
+        if text is None:
+            continue
+        scanned += 1
+
+        result = scan_text(rel, path, text, rules)
+        findings += result["findings"]
+        mentions += result["mentions"]
+        for leg in legs:
+            legs[leg] += result["legs"][leg]
+        declares_allowed_tools = declares_allowed_tools or result["declares_allowed_tools"]
+        for host in result["hosts"]:
+            if host not in allowlist:
+                hosts[host] = hosts.get(host, 0) + 1
+
+    if not declares_allowed_tools and scanned:
+        findings.append(synthetic(rules, "META-NO-ALLOWED-TOOLS"))
+    for rel in unread:
+        findings.append(synthetic(rules, "SCAN-TOO-LARGE", file=rel))
 
     ignored = load_ignores(root)
     if ignored:
-        findings = [f for f in findings if f["id"] not in ignored]
+        findings = [f for f in findings if f and f["id"] not in ignored]
         for leg in legs:
             legs[leg] = [e for e in legs[leg] if e["id"] not in ignored]
 
+    findings = [f for f in findings if f]
     findings.sort(key=lambda f: (SEVERITY_ORDER[f["severity"]], f["id"], f["file"]))
     present = [leg for leg in ("private", "untrusted", "exfil") if legs[leg]]
 
     return {
         "target": str(root),
         "files_scanned": scanned,
+        "files_hashed": len(digests),
+        "files_unread": sorted(unread),
         "findings": findings,
         "mentions": mentions,
         "legs": legs,
@@ -218,8 +352,9 @@ def scan(root: Path, rules: dict) -> dict:
     }
 
 
-def match_lines(pattern: re.Pattern, lines: list[str], mask: list[bool],
-                cap: int = 3, negation_safe: bool = False) -> list[dict]:
+def match_lines(
+    pattern: re.Pattern, lines: list[str], mask: list[bool], cap: int = 3, negation_safe: bool = False
+) -> list[dict]:
     hits = []
     for index, line in enumerate(lines):
         match = pattern.search(line)
@@ -229,7 +364,9 @@ def match_lines(pattern: re.Pattern, lines: list[str], mask: list[bool],
             continue
         is_code = mask[index] or in_inline_code(line, match.start())
         hits.append({"line": index + 1, "text": trim(line), "context": "code" if is_code else "prose"})
-        if len(hits) == cap and any(h["context"] == "code" for h in hits):
+        # Keep looking past prose matches: one real command outranks any number
+        # of mentions, and the caller only ever shows `cap` of them.
+        if len(hits) >= cap and any(h["context"] == "code" for h in hits):
             break
     hits.sort(key=lambda h: (h["context"] != "code", h["line"]))
     return hits[:cap]
@@ -255,22 +392,50 @@ def load_ignores(root: Path) -> dict[str, str]:
     return ignores
 
 
+def classify_provenance_file(path: Path) -> str | None:
+    """signature | attestation | key | manifest, or None.
+
+    A certificate is not a signature and a plugin manifest is not a checksum
+    file. Both used to be reported as provenance, which is worse than reporting
+    none: it tells you something was verified when nothing was.
+    """
+    name = path.name.lower()
+    if any(part in name for part in ATTESTATION_PARTS):
+        return "attestation"
+    if path.suffix.lower() in SIGNATURE_SUFFIXES or name in SIGNATURE_NAMES:
+        return "signature"
+    if path.suffix.lower() in KEY_MATERIAL_SUFFIXES or name == "cosign.pub":
+        return "key"
+    if name in MANIFEST_NAMES:
+        try:
+            if SHA256_RE.search(path.read_text(encoding="utf-8", errors="replace")[:200_000]):
+                return "manifest"
+        except OSError:
+            return None
+    return None
+
+
 def check_provenance(root: Path) -> dict:
-    if root.is_file():
-        root = root.parent
-    signatures, manifests = [], []
-    for pattern in SIGNATURE_GLOBS:
-        signatures += [str(p.relative_to(root)) for p in root.rglob(pattern) if p.is_file()]
-    for path in root.rglob("*"):
-        if path.is_file() and path.name.lower() in MANIFEST_NAMES:
-            manifests.append(str(path.relative_to(root)))
-    if signatures:
+    """Walk the same tree the scanner walks, so results cannot disagree."""
+    base = root if root.is_dir() else root.parent
+    found: dict[str, list[str]] = {"signature": [], "attestation": [], "key": [], "manifest": []}
+    for path in iter_files(base):
+        kind = classify_provenance_file(path)
+        if kind:
+            found[kind].append(relative_name(base, path))
+
+    if found["signature"] or found["attestation"]:
         state = "signed"
-    elif manifests:
+    elif found["manifest"]:
         state = "hashed"
     else:
         state = "none"
-    return {"state": state, "signatures": sorted(set(signatures)), "manifests": sorted(set(manifests))}
+    return {
+        "state": state,
+        "signatures": sorted(found["signature"] + found["attestation"]),
+        "manifests": sorted(found["manifest"]),
+        "keys_without_signatures": sorted(found["key"]) if state == "none" else [],
+    }
 
 
 def decide(report: dict) -> str:
@@ -302,10 +467,12 @@ def render(report: dict, color: bool) -> str:
 
     verdict = report["verdict"]
     label, advice = VERDICT_TEXT[verdict]
+    unread = len(report["files_unread"])
+    tally = f"  {report['files_scanned']} files read, {report['files_hashed']} hashed"
     out = [
         "",
         f"  trust-me-bro  {report['target']}",
-        f"  {report['files_scanned']} files read",
+        tally + (f", {unread} too large to read" if unread else ""),
         "",
         f"  {paint(label, COLORS[verdict])}  {advice}",
         "",
@@ -318,17 +485,24 @@ def render(report: dict, color: bool) -> str:
         detail = ", ".join(sorted({e["title"] for e in report["legs"][leg]})[:3]) or "not seen"
         out.append(f"    [{mark}] {LEG_LABEL[leg]:<18} {detail}")
     if report["trifecta"]:
-        out.append(paint("    all three legs present: this skill can read your secrets, be told what to do", COLORS["stop"]))
+        out.append(
+            paint("    all three legs present: this skill can read your secrets, be told what to do", COLORS["stop"])
+        )
         out.append(paint("    by someone else, and send the result away", COLORS["stop"]))
     out.append("")
 
     prov = report["provenance"]
     if prov["state"] == "signed":
         out.append(f"  Provenance      signed ({', '.join(prov['signatures'][:3])})")
+        out.append("                  the signature exists; verifying it is a separate step")
     elif prov["state"] == "hashed":
         out.append(f"  Provenance      hashes only, no signature ({', '.join(prov['manifests'][:3])})")
     else:
         out.append("  Provenance      none: unsigned, unattested, no publisher identity")
+        if prov["keys_without_signatures"]:
+            out.append(
+                f"                  ships key material but nothing signed: {', '.join(prov['keys_without_signatures'][:3])}"
+            )
     out.append("")
 
     if report["findings"]:
@@ -356,6 +530,7 @@ def render(report: dict, color: bool) -> str:
 
 
 # ---------------------------------------------------------------------- lock
+
 
 def lock_path(root: Path) -> Path:
     return (root if root.is_dir() else root.parent) / LOCK_NAME
@@ -399,8 +574,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Audit an agent skill or plugin before installing it.")
     parser.add_argument("target", help="path to a skill directory or a single file")
     parser.add_argument("--json", action="store_true", dest="as_json", help="machine-readable output")
-    parser.add_argument("--pin", action="store_true", help=f"write {LOCK_NAME} recording the version you approved")
-    parser.add_argument("--check", action="store_true", help=f"compare against {LOCK_NAME} and report drift")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--pin", action="store_true", help=f"write {LOCK_NAME} recording the version you approved")
+    mode.add_argument("--check", action="store_true", help=f"compare against {LOCK_NAME} and report drift")
     parser.add_argument("--no-color", action="store_true")
     args = parser.parse_args(argv)
 
@@ -409,12 +585,27 @@ def main(argv: list[str] | None = None) -> int:
         print(f"trust-me-bro: no such path: {root}", file=sys.stderr)
         return 3
 
-    report = scan(root, load_rules())
+    try:
+        rules = load_rules()
+    except (OSError, json.JSONDecodeError, re.error) as error:
+        print(f"trust-me-bro: cannot load rules: {error}", file=sys.stderr)
+        return 3
+
+    report = scan(root, rules)
     report["verdict"] = decide(report)
 
     if args.check:
         code, message = check_lock(root, report)
-        print(f"\n  trust-me-bro  {root}\n  {message}\n")
+        if args.as_json:
+            print(
+                json.dumps(
+                    {"target": str(root), "drift": code != 0, "status": code, "message": message},
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(f"\n  trust-me-bro  {root}\n  {message}\n")
         return code
 
     if args.as_json:

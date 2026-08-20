@@ -1,10 +1,15 @@
 # trust-me-bro
 
+[![ci](https://github.com/kanywst/trust-me-bro/actions/workflows/ci.yml/badge.svg)](https://github.com/kanywst/trust-me-bro/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/kanywst/trust-me-bro/badge)](https://scorecard.dev/viewer/?uri=github.com/kanywst/trust-me-bro)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![no dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](pyproject.toml)
+
 Every skill you install says trust me bro. This one reads it first.
 
 ```text
   trust-me-bro  ./repo-summarizer
-  1 files read
+  1 files read, 1 hashed
 
   STOP  Do not install this until someone explains it.
 
@@ -75,9 +80,11 @@ python3 scripts/scan.py ./some-skill
 | `PERSIST-AGENT-CONFIG-WRITE` | writes to your agent's config or installs a hook |
 | `PERSIST-SHELL-PROFILE` | installs itself into your shell or a scheduler |
 
-Plus the boring but load-bearing ones: unpinned sources, runtime installs, wildcard tool grants, root, and every external host the skill talks to.
+Plus the boring but load-bearing ones: unpinned sources, runtime installs, wildcard tool grants, root, and every external host the skill talks to. A file too large for the rules to read is itself a finding, because "we did not look inside that one" should never be silent.
 
 **Provenance.** Signed, hashed, or neither. It will almost always say neither. That is a fact about the ecosystem in 2026, not an accusation about the skill you are looking at.
+
+Signed means a detached signature or an attestation is present, and nothing weaker. A certificate or a public key sitting in the folder proves somebody has a key, not that anything was signed, so it is reported as key material next to a verdict of none. A plugin `manifest.json` with no digests in it is not a checksum file either. Getting this wrong would mean telling you something was verified when nothing was, which is the one failure this tool cannot afford.
 
 ## Pin what you approved
 
@@ -88,6 +95,8 @@ python3 scripts/scan.py ./some-skill --pin    # record the exact bytes you appro
 python3 scripts/scan.py ./some-skill --check  # did it change under you?
 ```
 
+The lock covers **every** file, hashed from the bytes on disk, including binaries and anything too large to scan. Those are exactly where a payload would go, so a lock that skipped them would be theatre.
+
 ```text
   trust-me-bro  ./some-skill
   changed since you approved it:
@@ -96,7 +105,7 @@ python3 scripts/scan.py ./some-skill --check  # did it change under you?
   Re-read it. You approved a different version.
 ```
 
-Exit codes: `0` fine, `1` a human should read it, `2` stop, `3` bad path. Wire it into CI if you vendor skills.
+Exit codes: `0` fine, `1` a human should read it, `2` stop, `3` bad path. `--check` reuses them: `0` unchanged, `1` drifted, `2` never pinned. Both take `--json`. Wire it into CI if you vendor skills.
 
 ## Prose is not code
 
@@ -134,7 +143,9 @@ Then:
 python3 -m unittest discover -s tests
 ```
 
-Add a test with your rule. A rule with no test is a rule that will be broken by the next one.
+Add a test with your rule. A rule with no test is a rule that will be broken by the next one, and CI enforces that for critical rules: any `critical` entry the fixtures never trigger fails the build.
+
+CI also runs the suite on Linux, macOS and Windows across Python 3.10 to 3.13, checks the command-line contract against both fixtures end to end, lints with ruff and markdownlint, compiles every regex in the rule file, and runs CodeQL and OpenSSF Scorecard.
 
 ## Calibration
 

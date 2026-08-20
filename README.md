@@ -135,6 +135,8 @@ Injection wording is the exception. A skill is instructions, so a sentence telli
 
 It reads text. That is the whole design, and the whole limitation.
 
+The text is treated as hostile, because a skill picks its own bytes. Symlinks are never followed, so `notes.md -> ~/.aws/credentials` cannot make this tool print your own secrets into its report. No single regex is ever handed an unbounded line, so a 50 KB line cannot stall a scan. A line longer than 2000 characters is matched in overlapping windows and again with its padding compressed, and it is reported as critical either way, because full pattern coverage cannot be promised at that length and the verdict should not go quiet about it.
+
 - It cannot tell you what a URL will serve tomorrow. That is why `curl … | sh` is a stop rather than a warning.
 - It does not execute anything, sandbox anything, or watch anything at run time.
 - It has no model of intent. It reports what a skill can reach. "This can read your `.env` and POST to `api.example.com`" is a fact you can check. "This is malware" would be a guess.

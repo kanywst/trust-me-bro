@@ -1,0 +1,18 @@
+version: 2
+
+# The scanner itself has no dependencies, on purpose: a security tool you have
+# to `pip install` before you can audit anything has already lost. So the only
+# supply chain here is the one CI runs on.
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch

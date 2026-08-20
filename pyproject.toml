@@ -1,0 +1,26 @@
+# Config only. There is nothing to install: the scanner is one stdlib file and
+# stays that way, because a tool you have to install before you can audit
+# anything has already lost the argument it is making.
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+  "E", "W",   # pycodestyle
+  "F",        # pyflakes
+  "I",        # import order
+  "UP",       # pyupgrade
+  "B",        # bugbear
+  "SIM",      # simplify
+  "RUF",      # ruff
+]
+ignore = [
+  # The rule file is data. Long regexes in it are not this file's problem, and
+  # a wrapped regex is a broken regex.
+  "E501",
+]
+
+[tool.ruff.format]
+quote-style = "double"

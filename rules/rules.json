@@ -298,10 +298,10 @@
     },
     {
       "id": "OBFUS-LONG-LINE",
-      "severity": "high",
+      "severity": "critical",
       "pattern": null,
       "title": "a line is too long to review or to match in full",
-      "why": "Real code and real prose do not run to thousands of characters on one line. The whole line is still matched, in overlapping windows, so nothing hides past the limit. The line itself is the signal: it was written to be unreadable."
+      "why": "Real code and real prose do not run to thousands of characters on one line. The line is matched in overlapping windows and again with its padding compressed, but full pattern coverage cannot be guaranteed at this length, so the verdict does not get to be quiet about it. The line was written to be unreadable."
     }
   ],
   "host_allowlist": [

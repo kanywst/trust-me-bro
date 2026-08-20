@@ -412,19 +412,57 @@ class _Hit:
         return self._start
 
 
+RUN_RE = re.compile(r"(.)\1{7,}")
+
+
+def squeeze(line: str) -> str:
+    """Collapse padding while keeping the shape of a command intact.
+
+    Windowing alone is not enough. Several patterns have to span a gap, so
+    `curl <2500 characters of filler> | bash` fits in no single window and the
+    rule silently stops firing. Padding is compressible by construction, so
+    compress it: runs of one character, runs of whitespace, and a token repeated
+    over and over all shrink to a few copies. What is left still looks like the
+    command it is.
+    """
+    line = RUN_RE.sub(lambda match: match.group(1) * 8, line)
+    # Per distinct token, not per consecutive run: filler is usually a short
+    # cycle such as "-H x -H x -H x", where no two neighbours are equal.
+    seen: dict[str, int] = {}
+    out = []
+    for token in line.split():
+        count = seen.get(token, 0) + 1
+        seen[token] = count
+        if count <= 3:
+            out.append(token)
+    return " ".join(out)
+
+
 def search_bounded(pattern: re.Pattern, line: str):
     """Search the whole line without ever handing the engine an unbounded one.
 
     Truncating instead would let a hostile line pad past the limit and hide its
-    payload behind the guard that exists to keep the scan fast.
+    payload behind the guard that exists to keep the scan fast. A line this long
+    also raises OBFUS-LONG-LINE, which is critical on its own, so a pattern that
+    still slips through cannot quietly downgrade the verdict.
     """
     if len(line) <= MAX_LINE:
         return pattern.search(line)
+
     step = MAX_LINE - WINDOW_OVERLAP
     for offset in range(0, len(line), step):
         found = pattern.search(line[offset : offset + MAX_LINE])
         if found:
             return _Hit(offset + found.start())
+
+    compressed = squeeze(line)
+    if len(compressed) < len(line):
+        for offset in range(0, max(len(compressed), 1), step):
+            if pattern.search(compressed[offset : offset + MAX_LINE]):
+                # The offset belongs to the compressed line, so report the start
+                # of the real one: negation and inline-code context cannot be
+                # judged against a position that no longer exists.
+                return _Hit(0)
     return None
 
 

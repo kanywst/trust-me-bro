@@ -1,0 +1,35 @@
+{
+  "name": "trust-me-bro",
+  "owner": {
+    "name": "kanywst",
+    "url": "https://github.com/kanywst"
+  },
+  "metadata": {
+    "description": "A pre-install audit for agent skills, plugins, and MCP servers.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "trust-me-bro",
+      "source": "./",
+      "description": "Read an agent skill, plugin, or MCP server before installing it. Reports lethal-trifecta reach, injection wording aimed at the agent, provenance, and drift after approval.",
+      "version": "0.1.0",
+      "author": {
+        "name": "kanywst",
+        "url": "https://github.com/kanywst"
+      },
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/kanywst/trust-me-bro",
+      "repository": "https://github.com/kanywst/trust-me-bro",
+      "category": "security",
+      "keywords": [
+        "security",
+        "agent-skills",
+        "supply-chain",
+        "prompt-injection",
+        "provenance",
+        "mcp"
+      ]
+    }
+  ]
+}

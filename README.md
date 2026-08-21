@@ -171,7 +171,7 @@ CI also runs the suite on Linux, macOS and Windows across Python 3.10 to 3.13, c
 
 ## Calibration
 
-The rules were not written from a template. They were tuned against real skills pulled from GitHub, and every false positive in that sample drove a change: `curl | bash` now requires an actual URL, `curl … | python3 -c '…'` no longer counts as remote code because the program is the local one, `crontab -l` no longer counts as persistence, `never use sudo` no longer counts as sudo, and enumerated example paths no longer count as access.
+The rules were not written from a template. They were tuned against real skills pulled from GitHub, and every false positive in that sample drove a change: `curl | bash` now requires an actual URL, `curl … | python3 -c '…'` no longer counts as remote code because the program is the local one — unless that program sources or evals stdin, which is how `bash -c '. /dev/stdin'` smuggles the download back in — `crontab -l` no longer counts as persistence, `never use sudo` no longer counts as sudo, and enumerated example paths no longer count as access.
 
 `examples/evil-skill/` is a deliberately malicious fixture that trips every critical rule. `examples/plain-skill/` is an ordinary skill that trips none. Both are in the test suite, because a scanner that only ever says STOP is as useless as one that never does.
 

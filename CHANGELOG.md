@@ -12,7 +12,7 @@ First release. A pre-install audit for agent skills, plugins, and MCP servers: o
 
 ### Added
 
-- Remote-code detection that distinguishes `curl … | python3` from `curl … | python3 -c '…'`, and still catches `bash -c '. /dev/stdin'`, where the inline program sources the download back off stdin.
+- Remote-code detection that distinguishes `curl … | python3` from `curl … | python3 -c '…'`, and still catches `bash -c '. /dev/stdin'` and `bash -c "$(cat)"`, where the inline program pulls the download back in and runs it.
 - Lethal-trifecta analysis. A skill is scored on three legs — private data, untrusted content, outbound channel — and all three present is a `stop`.
 - A rule set of standalone findings that do not need the trifecta: remote code execution, encoded exfiltration, injection wording aimed at the agent, permission-system bypass, and persistence into shell profiles, schedulers, and agent config.
 - Prose-versus-code classification. A skill that *describes* `~/.ssh` does not tick the leg that a skill *reading* it does. Injection wording is the exception, because a skill is instructions.

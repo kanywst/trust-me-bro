@@ -6,7 +6,7 @@ Notable changes, newest first. This project follows [Keep a Changelog](https://k
 
 Nothing yet.
 
-## [0.1.0] - 2026-08-21
+## [0.1.0] - 2026-08-22
 
 First release. A pre-install audit for agent skills, plugins, and MCP servers: one standard-library Python file, no dependencies, no network calls, no install step.
 

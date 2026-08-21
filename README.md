@@ -72,7 +72,7 @@ python3 trust-me-bro/scripts/scan.py trust-me-bro/SKILL.md
 python3 trust-me-bro/scripts/scan.py trust-me-bro/scripts
 ```
 
-Both come back `LOOKS PLAIN` with no findings and exit `0`, and both still tick the **private data** leg, because the scanner's own pattern list names `~/.ssh` and `.env` in order to look for them. One leg on its own is not the trifecta and there is no outbound channel here, which is why the verdict stays where it is. It is the same false positive every security tool produces about itself, reported rather than special-cased.
+Both come back `LOOKS PLAIN` and exit `0`. `SKILL.md` carries one low finding, that it declares no `allowed-tools`, and both tick the **private data** leg, because the scanner's own pattern list names `~/.ssh` and `.env` in order to look for them. One leg on its own is not the trifecta and there is no outbound channel here, which is why the verdict stays where it is. It is the same false positive every security tool produces about itself, reported rather than special-cased.
 
 Point it at the whole repository and it says **STOP**, because the repository ships `examples/evil-skill/` and a test suite full of attack strings. That is the tool being right about the text in front of it and wrong about what the text is for, which is the exact limitation the rest of this README is about. It is a scanner, not a mind reader.
 

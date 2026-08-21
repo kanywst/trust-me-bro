@@ -277,6 +277,24 @@ class NothingRead(unittest.TestCase):
         self.assertNotIn("not seen", rendered)
 
 
+class AllowedToolsScope(unittest.TestCase):
+    """`allowed-tools` is an Agent Skills field. Elsewhere its absence is not news."""
+
+    def test_reported_missing_on_a_skill(self):
+        self.assertIn("META-NO-ALLOWED-TOOLS", rule_ids(report_for("# A skill\n")))
+
+    def test_not_reported_when_the_skill_declares_it(self):
+        report = report_for("---\nname: x\nallowed-tools: Read\n---\n\n# A skill\n")
+        self.assertNotIn("META-NO-ALLOWED-TOOLS", rule_ids(report))
+
+    def test_not_reported_on_an_mcp_config(self):
+        report = report_for('{"mcpServers": {"x": {"command": "node"}}}\n', name=".mcp.json")
+        self.assertNotIn("META-NO-ALLOWED-TOOLS", rule_ids(report))
+
+    def test_not_reported_on_a_bare_script(self):
+        self.assertNotIn("META-NO-ALLOWED-TOOLS", rule_ids(report_for("print('hi')\n", name="helper.py")))
+
+
 class PinAndDrift(unittest.TestCase):
     def test_pin_then_check_is_clean_then_dirty(self):
         with tempfile.TemporaryDirectory() as tmp:

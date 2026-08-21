@@ -22,6 +22,7 @@ from pathlib import Path
 RULES_PATH = Path(__file__).resolve().parent.parent / "rules" / "rules.json"
 LOCK_NAME = ".trustmebro.lock"
 IGNORE_NAME = ".trustmebro.ignore"
+SKILL_NAME = "skill.md"
 
 TEXT_SUFFIXES = {
     ".md",
@@ -318,6 +319,7 @@ def scan(root: Path, rules: dict) -> dict:
     longline: list[str] = []
     links: list[dict] = []
     declares_allowed_tools = False
+    is_skill = False
     scanned = 0
 
     allowlist = set(rules["host_allowlist"])
@@ -346,6 +348,7 @@ def scan(root: Path, rules: dict) -> dict:
         if text is None:
             continue
         scanned += 1
+        is_skill = is_skill or path.name.lower() == SKILL_NAME
         if any(len(line) > MAX_LINE for line in text.splitlines()):
             longline.append(rel)
 
@@ -359,7 +362,10 @@ def scan(root: Path, rules: dict) -> dict:
             if host not in allowlist:
                 hosts[host] = hosts.get(host, 0) + 1
 
-    if not declares_allowed_tools and scanned:
+    # `allowed-tools` is an Agent Skills frontmatter field. Reporting it absent
+    # from an MCP config or a bare script is noise about a field that does not
+    # exist there, and noise is how a real finding gets scrolled past.
+    if is_skill and not declares_allowed_tools:
         findings.append(synthetic(rules, "META-NO-ALLOWED-TOOLS"))
     for rel in unread:
         findings.append(synthetic(rules, "SCAN-TOO-LARGE", file=rel))

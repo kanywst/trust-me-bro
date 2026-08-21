@@ -52,11 +52,24 @@ class Fixtures(unittest.TestCase):
         self.assertEqual(report["legs_present"], [])
         self.assertNotIn("META-NO-ALLOWED-TOOLS", rule_ids(report))
 
-    def test_scanning_this_repo_does_not_stop(self):
-        """The rule file is full of attack patterns. It must not flag itself."""
+    def test_the_scanner_never_reads_its_own_rule_file(self):
+        """It names every pattern it hunts for, so reading it would trip them all.
+
+        Asserting the exclusion, not the verdict: a verdict assertion here
+        passes for the wrong reason, because a walk that skipped the only file
+        in the directory reads nothing and so flags nothing either way.
+        """
         report = scan.scan(ROOT / "rules", RULES)
-        report["verdict"] = scan.decide(report)
-        self.assertNotEqual(report["verdict"], "stop", rule_ids(report))
+        self.assertEqual(report["files_scanned"], 0)
+        self.assertEqual(report["digests"], {})
+
+    def test_a_copy_of_the_rule_file_elsewhere_is_not_exempt(self):
+        """The exclusion is one resolved path, not a filename anyone can claim."""
+        with tempfile.TemporaryDirectory() as tmp:
+            body = (ROOT / "rules" / "rules.json").read_text(encoding="utf-8")
+            (Path(tmp) / "rules.json").write_text(body, encoding="utf-8")
+            report = scan.scan(Path(tmp), RULES)
+        self.assertEqual(report["files_scanned"], 1)
 
 
 class Trifecta(unittest.TestCase):

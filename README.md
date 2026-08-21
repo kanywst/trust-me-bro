@@ -72,7 +72,7 @@ python3 trust-me-bro/scripts/scan.py trust-me-bro/SKILL.md
 python3 trust-me-bro/scripts/scan.py trust-me-bro/scripts
 ```
 
-Both come back `LOOKS PLAIN` and exit `0`. `SKILL.md` carries one low finding, that it declares no `allowed-tools`, and both tick the **private data** leg, because the scanner's own pattern list names `~/.ssh` and `.env` in order to look for them. One leg on its own is not the trifecta and there is no outbound channel here, which is why the verdict stays where it is. It is the same false positive every security tool produces about itself, reported rather than special-cased.
+Both come back `LOOKS PLAIN` and exit `0`. `SKILL.md` carries one low finding, that it declares no `allowed-tools`, and both tick the **private data** leg, because the scanner's own source names the paths it hunts for: the comments in `scan.py` explaining the `~/.aws/credentials` symlink case, `.env` sitting in the list of file types it will read, and one real `os.environ.get` call. The rule file itself is not the cause — it is excluded from every scan. One leg on its own is not the trifecta and there is no outbound channel here, which is why the verdict stays where it is. It is the same false positive every security tool produces about itself, reported rather than special-cased.
 
 Point it at the whole repository and it says **STOP**, because the repository ships `examples/evil-skill/` and a test suite full of attack strings. That is the tool being right about the text in front of it and wrong about what the text is for, which is the exact limitation the rest of this README is about. It is a scanner, not a mind reader.
 
@@ -91,12 +91,15 @@ python3 scripts/scan.py ./some-skill
 | | |
 | --- | --- |
 | `RCE-PIPE-SHELL` | downloads a remote script and executes it |
+| `RCE-PIPE-INTERPRETER` | pipes a remote download into an interpreter |
 | `OBFUS-ENCODED-SECRETS` | encodes local files or environment before sending them |
 | `INJ-IGNORE-INSTRUCTIONS` | tells the agent to ignore its previous instructions |
 | `INJ-HIDE-FROM-USER` | tells the agent to hide something from you |
 | `PERM-DANGEROUS-FLAG` | disables the agent's permission system |
 | `PERSIST-AGENT-CONFIG-WRITE` | writes to your agent's config or installs a hook |
 | `PERSIST-SHELL-PROFILE` | installs itself into your shell or a scheduler |
+
+The two `RCE-PIPE-*` rules split one line between them, and the split is the honest part. `curl … | bash` executes the download, and that is critical. `curl … | python3 -c '…'` hands the download to a local program, and whether that program parses it or runs it cannot be read off the command line — `bash -c 'read l; $l'` names nothing a pattern can look for. So the second rule reports every one of them at `high` instead of guessing, and the verdict floor stays at **REVIEW**, exit `1`. Only the forms that can be shown to execute the download — `. /dev/stdin`, `eval`, `exec`, `$(cat)` — are promoted back to critical. Enumerating attack idioms is a race a scanner loses; not depending on winning it is the design.
 
 Plus the boring but load-bearing ones: unpinned sources, runtime installs, wildcard tool grants, root, and every external host the skill talks to. A file too large for the rules to read is itself a finding, because "we did not look inside that one" should never be silent.
 
@@ -171,7 +174,7 @@ CI also runs the suite on Linux, macOS and Windows across Python 3.10 to 3.13, c
 
 ## Calibration
 
-The rules were not written from a template. They were tuned against real skills pulled from GitHub, and every false positive in that sample drove a change: `curl | bash` now requires an actual URL, `curl … | python3 -c '…'` no longer counts as remote code because the program is the local one — unless that program pulls the download back in anyway, by sourcing `/dev/stdin`, evalling it, or splicing it in with `$(cat)` — `crontab -l` no longer counts as persistence, `never use sudo` no longer counts as sudo, and enumerated example paths no longer count as access.
+The rules were not written from a template. They were tuned against real skills pulled from GitHub, and every false positive in that sample drove a change: `curl | bash` now requires an actual URL, `curl … | python3 -c '…'` is no longer called remote code execution, because the program is the local one — `crontab -l` no longer counts as persistence, `never use sudo` no longer counts as sudo, and enumerated example paths no longer count as access.
 
 `examples/evil-skill/` is a deliberately malicious fixture that trips every critical rule. `examples/plain-skill/` is an ordinary skill that trips none. Both are in the test suite, because a scanner that only ever says STOP is as useless as one that never does.
 

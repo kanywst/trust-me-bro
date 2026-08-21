@@ -436,7 +436,14 @@ class Cli(unittest.TestCase):
         self.assertNotIn("NOTAREALKEY", result.stdout + result.stderr)
         self.assertNotIn("credentials", result.stdout)
 
-    def test_a_symlinked_directory_target_is_refused_too(self):
+    def test_a_symlinked_directory_target_is_followed_but_reported(self):
+        """Refusing this would break the way most people install skills.
+
+        A skills directory linked to a dotfiles checkout is the ordinary case,
+        not an attack: the user named it, and the walk inside still refuses
+        every link the skill itself ships. So it is followed and said out loud,
+        with the target shown, rather than refused or followed silently.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             real = Path(tmp) / "real"
             real.mkdir()
@@ -447,7 +454,10 @@ class Cli(unittest.TestCase):
             except (OSError, NotImplementedError):
                 self.skipTest("symlinks unavailable on this platform")
             result = self._run(str(link), "--no-color")
-        self.assertEqual(result.returncode, 3)
+            payload = json.loads(self._run(str(link), "--json").stdout)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("LINK-TARGET-NAMED", {f["id"] for f in payload["findings"]})
+        self.assertIn(str(real), result.stdout)
 
     def test_pin_and_check_are_mutually_exclusive(self):
         result = self._run(str(ROOT / "examples" / "plain-skill"), "--pin", "--check")

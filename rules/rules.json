@@ -290,6 +290,13 @@
       "why": "Whatever reads this skill reads that file instead. It is not followed here, and it should not be followed by your agent either."
     },
     {
+      "id": "LINK-TARGET-NAMED",
+      "severity": "low",
+      "pattern": null,
+      "title": "the directory you named is a symlink",
+      "why": "Followed, because you named it and pointing a skills directory at a dotfiles checkout is ordinary. Links found inside a skill are not followed, because the skill chose those. What actually got scanned is the target, so check that it is what you meant to audit."
+    },
+    {
       "id": "LINK-PRESENT",
       "severity": "medium",
       "pattern": null,

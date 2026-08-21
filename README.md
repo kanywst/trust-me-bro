@@ -123,7 +123,7 @@ The lock covers **every** file, hashed from the bytes on disk, including binarie
   Re-read it. You approved a different version.
 ```
 
-Exit codes: `0` fine, `1` a human should read it, `2` stop, `3` a path it will not scan (missing, or a symlink). `--check` reuses them: `0` unchanged, `1` drifted, `2` never pinned. Both take `--json`. Wire it into CI if you vendor skills.
+Exit codes: `0` fine, `1` a human should read it, `2` stop, `3` a path it will not scan (missing, or a single file reached through a symlink). `--check` reuses them: `0` unchanged, `1` drifted, `2` never pinned. Both take `--json`. Wire it into CI if you vendor skills.
 
 A target where nothing could be read — an empty directory, a mistyped path that happens to exist, a folder of binaries — reports **NOTHING READ** and exits `1`. It is deliberately not `0`. A scan that opened no files has cleared nothing, and in CI the difference between "clean" and "never looked" is the whole point.
 
@@ -137,7 +137,7 @@ Injection wording is the exception. A skill is instructions, so a sentence telli
 
 It reads text. That is the whole design, and the whole limitation.
 
-The text is treated as hostile, because a skill picks its own bytes. Symlinks are never followed, so `notes.md -> ~/.aws/credentials` cannot make this tool print your own secrets into its report. That holds for the path you type as well as the ones found by the walk: naming a symlink is refused rather than resolved, because resolving it would read the target before anything got to object. No single regex is ever handed an unbounded line, so a 50 KB line cannot stall a scan. A line longer than 2000 characters is matched in overlapping windows and again with its padding compressed, and it is reported as critical either way, because full pattern coverage cannot be promised at that length and the verdict should not go quiet about it.
+The text is treated as hostile, because a skill picks its own bytes. Symlinks are never followed, so `notes.md -> ~/.aws/credentials` cannot make this tool print your own secrets into its report. The path you type is handled separately, because you chose it and the skill did not. A **file** named through a link is refused rather than resolved — resolving it would quote the target's lines into the report, and nothing legitimate needs it. A **directory** named through a link is followed and reported with its target, because pointing a skills directory at a dotfiles checkout is how most people install skills, and breaking that to close a hole that only exists for single files would be the wrong trade. No single regex is ever handed an unbounded line, so a 50 KB line cannot stall a scan. A line longer than 2000 characters is matched in overlapping windows and again with its padding compressed, and it is reported as critical either way, because full pattern coverage cannot be promised at that length and the verdict should not go quiet about it.
 
 - It cannot tell you what a URL will serve tomorrow. That is why `curl … | sh` is a stop rather than a warning.
 - It does not execute anything, sandbox anything, or watch anything at run time.

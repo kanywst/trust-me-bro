@@ -313,7 +313,14 @@ def synthetic(rules: dict, rule_id: str, file: str = "-", extra: str = "") -> di
     }
 
 
-def scan(root: Path, rules: dict) -> dict:
+def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
+    """`named_link` is the symlink the caller typed, already resolved to `root`.
+
+    It is reported but not refused: pointing a skills directory at a dotfiles
+    checkout is how most people install skills, and refusing it would break the
+    ordinary case to close a hole that only exists for single files. Links found
+    *inside* a skill stay unfollowed, because the skill chose those.
+    """
     findings: list[dict] = []
     mentions: list[dict] = []
     legs: dict[str, list[dict]] = {"private": [], "untrusted": [], "exfil": []}
@@ -371,6 +378,8 @@ def scan(root: Path, rules: dict) -> dict:
     # exist there, and noise is how a real finding gets scrolled past.
     if is_skill and not declares_allowed_tools:
         findings.append(synthetic(rules, "META-NO-ALLOWED-TOOLS"))
+    if named_link is not None:
+        findings.append(synthetic(rules, "LINK-TARGET-NAMED", extra=f" -> {named_link}"))
     for rel in unread:
         findings.append(synthetic(rules, "SCAN-TOO-LARGE", file=rel))
     for rel in longline:
@@ -742,11 +751,17 @@ def main(argv: list[str] | None = None) -> int:
     # would read and print the target's contents, which is exactly the failure
     # the walk's own symlink handling exists to prevent.
     named = Path(args.target)
+    named_link = None
     if named.is_symlink():
-        target = os.readlink(named)
-        print(f"trust-me-bro: {args.target} is a symlink to {target}.", file=sys.stderr)
-        print("  Not following it. Point at the real path if that is what you meant.", file=sys.stderr)
-        return 3
+        named_link = os.readlink(named)
+        if not named.is_dir():
+            # A single file reached through a link is the attack: the report
+            # would quote lines from whatever it points at. Nothing legitimate
+            # needs it, unlike a skills directory linked to a dotfiles checkout,
+            # which is how most people install skills and is followed below.
+            print(f"trust-me-bro: {args.target} is a symlink to {named_link}.", file=sys.stderr)
+            print("  Not following it. Point at the real file if that is what you meant.", file=sys.stderr)
+            return 3
 
     root = named.resolve()
     if not root.exists():
@@ -759,7 +774,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"trust-me-bro: cannot load rules: {error}", file=sys.stderr)
         return 3
 
-    report = scan(root, rules)
+    report = scan(root, rules, named_link=named_link)
     report["verdict"] = decide(report)
 
     if args.check:

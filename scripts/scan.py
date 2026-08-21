@@ -736,7 +736,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-color", action="store_true")
     args = parser.parse_args(argv)
 
-    root = Path(args.target).resolve()
+    # resolve() dereferences the last component, so this has to run first. A
+    # skill can ship `SKILL.md -> ~/.aws/credentials`, and the single-file
+    # invocation is the one the README puts in front of people. Resolving it
+    # would read and print the target's contents, which is exactly the failure
+    # the walk's own symlink handling exists to prevent.
+    named = Path(args.target)
+    if named.is_symlink():
+        target = os.readlink(named)
+        print(f"trust-me-bro: {args.target} is a symlink to {target}.", file=sys.stderr)
+        print("  Not following it. Point at the real path if that is what you meant.", file=sys.stderr)
+        return 3
+
+    root = named.resolve()
     if not root.exists():
         print(f"trust-me-bro: no such path: {root}", file=sys.stderr)
         return 3

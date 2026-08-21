@@ -105,6 +105,20 @@ jobs:
           set -e
           test "$code" -eq 1 || { echo "::error::expected exit 1, got $code"; exit 1; }
 
+      - name: The reported version is the version the manifests ship
+        run: |
+          python - <<'PY'
+          import json, subprocess, sys
+          manifest = json.load(open(".claude-plugin/plugin.json"))["version"]
+          reported = subprocess.run(
+              [sys.executable, "scripts/scan.py", "--version"], capture_output=True, text=True
+          ).stdout.split()[-1]
+          if manifest != reported:
+              print(f"::error::plugin.json says {manifest}, scan.py --version says {reported}")
+              sys.exit(1)
+          print(f"version {reported}")
+          PY
+
   lint:
     name: lint
     runs-on: ubuntu-latest

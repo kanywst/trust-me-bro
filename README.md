@@ -175,6 +175,29 @@ The rules were not written from a template. They were tuned against real skills 
 
 `examples/evil-skill/` is a deliberately malicious fixture that trips every critical rule. `examples/plain-skill/` is an ordinary skill that trips none. Both are in the test suite, because a scanner that only ever says STOP is as useless as one that never does.
 
+## Versioning
+
+`python3 scripts/scan.py --version`. Semantic versioning, against a surface that is deliberately small, because a security tool people wire into CI has to be boring to upgrade.
+
+What is covered, and what a change to it costs:
+
+| surface | example | breaking? |
+| --- | --- | --- |
+| command-line flags | `--json`, `--pin`, `--check` | removing or repurposing one is **major** |
+| exit codes | `0` `1` `2` `3` | remapping one is **major** |
+| `--json` keys | `verdict`, `findings[].id`, `digests` | removing or retyping one is **major**; adding one is minor |
+| verdict strings | `stop` `review` `nothing-read` `read-it` `ok` | removing one is **major**; adding one is minor |
+| rule and leg IDs | `RCE-PIPE-SHELL` | removing or renaming one is **major**; adding one is minor |
+| `.trustmebro.lock` format | | a change older versions cannot read is **major** |
+
+What is not covered: the rendered text output, the wording of any `title` or `why`, the ordering of findings beyond the documented severity sort, and which lines a pattern happens to match. Parse `--json`, not the report.
+
+Tightening a rule so it stops firing on something it never should have flagged is a **patch**, even though a verdict can change. Same for widening one to catch something it always should have. The alternative is a tool that keeps a known false positive to protect a version number, and that trade is the wrong way round for this.
+
+Before 1.0.0 the minor version carries breaking changes, per semver's own rule for `0.x`.
+
+Changes are recorded in [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 Apache-2.0.

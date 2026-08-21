@@ -569,6 +569,13 @@ def decide(report: dict) -> str:
         return "stop"
     if "high" in severities:
         return "review"
+    # Nothing was read, so nothing was cleared. An empty directory, a mistyped
+    # path and a folder of binaries all land here, and all three would otherwise
+    # come back "no flagged patterns found" with exit 0 -- a green light from a
+    # scan that never happened. It sits above read-it because a result nobody
+    # can rely on is worse than a result that merely reaches the network.
+    if report["files_scanned"] == 0:
+        return "nothing-read"
     if "medium" in severities or report["external_hosts"] or len(report["legs_present"]) >= 2:
         return "read-it"
     return "ok"
@@ -579,10 +586,17 @@ def decide(report: dict) -> str:
 VERDICT_TEXT = {
     "stop": ("STOP", "Do not install this until someone explains it."),
     "review": ("REVIEW", "Read the flagged lines yourself before installing."),
+    "nothing-read": ("NOTHING READ", "No file here could be read. This is not a clean result, it is no result."),
     "read-it": ("READ IT", "Nothing alarming, but it reaches outside your machine."),
     "ok": ("LOOKS PLAIN", "No outbound reach and no flagged patterns found."),
 }
-COLORS = {"stop": "\033[31m", "review": "\033[33m", "read-it": "\033[36m", "ok": "\033[32m"}
+COLORS = {
+    "stop": "\033[31m",
+    "review": "\033[33m",
+    "nothing-read": "\033[33m",
+    "read-it": "\033[36m",
+    "ok": "\033[32m",
+}
 SEV_MARK = {"critical": "!!", "high": "! ", "medium": "~ ", "low": ". "}
 
 
@@ -604,10 +618,13 @@ def render(report: dict, color: bool) -> str:
     ]
 
     legs = report["legs_present"]
+    # "not seen" is a claim about text that was read. With nothing read it would
+    # be a claim about nothing, which is the reassurance this tool must not give.
+    absent = "not seen" if verdict != "nothing-read" else "nothing read"
     out.append("  Lethal trifecta")
     for leg in ("private", "untrusted", "exfil"):
         mark = "x" if leg in legs else " "
-        detail = ", ".join(sorted({e["title"] for e in report["legs"][leg]})[:3]) or "not seen"
+        detail = ", ".join(sorted({e["title"] for e in report["legs"][leg]})[:3]) or absent
         out.append(f"    [{mark}] {LEG_LABEL[leg]:<18} {detail}")
     if report["trifecta"]:
         out.append(
@@ -695,7 +712,7 @@ def check_lock(root: Path, report: dict) -> tuple[int, str]:
 
 # ---------------------------------------------------------------------- main
 
-EXIT = {"stop": 2, "review": 1, "read-it": 0, "ok": 0}
+EXIT = {"stop": 2, "review": 1, "nothing-read": 1, "read-it": 0, "ok": 0}
 
 
 def main(argv: list[str] | None = None) -> int:

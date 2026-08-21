@@ -125,6 +125,8 @@ The lock covers **every** file, hashed from the bytes on disk, including binarie
 
 Exit codes: `0` fine, `1` a human should read it, `2` stop, `3` bad path. `--check` reuses them: `0` unchanged, `1` drifted, `2` never pinned. Both take `--json`. Wire it into CI if you vendor skills.
 
+A target where nothing could be read — an empty directory, a mistyped path that happens to exist, a folder of binaries — reports **NOTHING READ** and exits `1`. It is deliberately not `0`. A scan that opened no files has cleared nothing, and in CI the difference between "clean" and "never looked" is the whole point.
+
 ## Prose is not code
 
 A skill that *describes* `~/.ssh` is not a skill that *reads* it, so threat-model docs and security tooling do not light up like a christmas tree. The scanner walks markdown fences and inline backticks, and treats a bullet enumerating four paths as prose rather than a command.

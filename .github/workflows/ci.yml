@@ -93,6 +93,18 @@ jobs:
       - name: Scanning this repo must not stop on its own rule file
         run: python scripts/scan.py rules --no-color
 
+      # The one exit code a CI pipeline must never get wrong. A target that
+      # read nothing is not a target that passed, and 0 here would be a green
+      # light from a scan that never opened a file.
+      - name: A target with nothing readable must not exit 0
+        run: |
+          mkdir -p "$RUNNER_TEMP/nothing"
+          set +e
+          python scripts/scan.py "$RUNNER_TEMP/nothing" --no-color
+          code=$?
+          set -e
+          test "$code" -eq 1 || { echo "::error::expected exit 1, got $code"; exit 1; }
+
   lint:
     name: lint
     runs-on: ubuntu-latest

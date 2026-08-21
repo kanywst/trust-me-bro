@@ -401,12 +401,20 @@ def scan(root: Path, rules: dict) -> dict:
 
 
 class _Hit:
-    """Reports a match position in the original line, not in the window."""
+    """A match position in the original line, not in the window.
 
-    __slots__ = ("_start",)
+    `exact` is False when the match was found in a compressed copy of the line,
+    where no position in the original survives. Callers must not judge context
+    from an invented offset: a fabricated 0 reads as "outside any inline code
+    span", which would demote a real command to prose and quietly drop it from
+    the trifecta.
+    """
 
-    def __init__(self, start: int):
+    __slots__ = ("_start", "exact")
+
+    def __init__(self, start: int, exact: bool = True):
         self._start = start
+        self.exact = exact
 
     def start(self) -> int:
         return self._start
@@ -459,10 +467,9 @@ def search_bounded(pattern: re.Pattern, line: str):
     if len(compressed) < len(line):
         for offset in range(0, max(len(compressed), 1), step):
             if pattern.search(compressed[offset : offset + MAX_LINE]):
-                # The offset belongs to the compressed line, so report the start
-                # of the real one: negation and inline-code context cannot be
-                # judged against a position that no longer exists.
-                return _Hit(0)
+                # No position in the original line survives compression, so the
+                # match is marked inexact and the caller treats it as code.
+                return _Hit(0, exact=False)
     return None
 
 
@@ -476,7 +483,11 @@ def match_lines(
             continue
         if negation_safe and NEGATION_RE.search(line[: match.start()]):
             continue
-        is_code = mask[index] or in_inline_code(line, match.start())
+        # An inexact match came out of a compressed copy of the line, where no
+        # original position exists. Treat it as code: the alternative is to
+        # infer prose from an invented offset and demote a real command.
+        exact = getattr(match, "exact", True)
+        is_code = mask[index] or not exact or in_inline_code(line, match.start())
         hits.append({"line": index + 1, "text": trim(line), "context": "code" if is_code else "prose"})
         # Keep looking past prose matches: one real command outranks any number
         # of mentions, and the caller only ever shows `cap` of them.

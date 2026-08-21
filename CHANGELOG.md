@@ -24,7 +24,7 @@ First release. A pre-install audit for agent skills, plugins, and MCP servers: o
 
 ### Security
 
-- Symlinks are never followed and never read. A skill shipping `notes.md -> ~/.aws/credentials` cannot make this tool print the reader's own secrets into its own report. Links are hashed by their target, so retargeting one is drift.
+- Symlinks are never followed and never read, including the target named on the command line, which is refused rather than resolved. A skill shipping `notes.md -> ~/.aws/credentials` cannot make this tool print the reader's own secrets into its own report. Links are hashed by their target, so retargeting one is drift.
 - No single regex is ever handed an unbounded line. Lines over 2000 characters are matched in overlapping windows and again with their padding compressed, so a payload cannot hide behind the guard that keeps the scan fast. Such a line is reported as `critical` either way, because full pattern coverage cannot be promised at that length.
 - A match found only in the compressed copy of a line is marked inexact and treated as code. Inferring prose from an offset that does not exist in the original would quietly demote a real command.
 - A target where nothing could be read reports `NOTHING READ` and exits `1`, never `0`. A scan that opened no files has cleared nothing.

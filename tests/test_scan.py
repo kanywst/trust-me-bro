@@ -415,6 +415,40 @@ class Cli(unittest.TestCase):
     def test_missing_path_exits_three(self):
         self.assertEqual(self._run("/nonexistent/path/xyz").returncode, 3)
 
+    def test_a_symlinked_target_is_refused_not_followed(self):
+        """resolve() dereferences the last component before the walk can object.
+
+        `SKILL.md -> ~/.aws/credentials` scanned directly used to read, hash and
+        report on the real file, using the single-file invocation the README
+        recommends. The walk has never followed a link; the argument did.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            secret = Path(tmp) / "credentials"
+            secret.write_text("aws_secret_access_key = NOTAREALKEY\n", encoding="utf-8")
+            link = Path(tmp) / "SKILL.md"
+            try:
+                link.symlink_to(secret)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks unavailable on this platform")
+            result = self._run(str(link), "--no-color")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("symlink", result.stderr)
+        self.assertNotIn("NOTAREALKEY", result.stdout + result.stderr)
+        self.assertNotIn("credentials", result.stdout)
+
+    def test_a_symlinked_directory_target_is_refused_too(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            real = Path(tmp) / "real"
+            real.mkdir()
+            (real / "SKILL.md").write_text("# hi\n", encoding="utf-8")
+            link = Path(tmp) / "skill"
+            try:
+                link.symlink_to(real, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks unavailable on this platform")
+            result = self._run(str(link), "--no-color")
+        self.assertEqual(result.returncode, 3)
+
     def test_pin_and_check_are_mutually_exclusive(self):
         result = self._run(str(ROOT / "examples" / "plain-skill"), "--pin", "--check")
         self.assertEqual(result.returncode, 2)

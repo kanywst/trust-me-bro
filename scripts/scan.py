@@ -19,6 +19,10 @@ import re
 import sys
 from pathlib import Path
 
+# The one place the version is written. The plugin manifests are checked
+# against it in CI, so a release cannot ship three numbers that disagree.
+__version__ = "0.1.0"
+
 RULES_PATH = Path(__file__).resolve().parent.parent / "rules" / "rules.json"
 LOCK_NAME = ".trustmebro.lock"
 IGNORE_NAME = ".trustmebro.ignore"
@@ -724,6 +728,7 @@ EXIT = {"stop": 2, "review": 1, "nothing-read": 1, "read-it": 0, "ok": 0}
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Audit an agent skill or plugin before installing it.")
     parser.add_argument("target", help="path to a skill directory or a single file")
+    parser.add_argument("--version", action="version", version=f"trust-me-bro {__version__}")
     parser.add_argument("--json", action="store_true", dest="as_json", help="machine-readable output")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--pin", action="store_true", help=f"write {LOCK_NAME} recording the version you approved")

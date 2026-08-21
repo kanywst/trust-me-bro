@@ -576,6 +576,13 @@ class PluginManifests(unittest.TestCase):
         self.assertEqual(self.plugin["version"], self.entry["version"])
         self.assertEqual(self.plugin["version"], self.market["metadata"]["version"])
 
+    def test_the_manifests_agree_with_the_scanner(self):
+        """`scan.py --version` is what a user can actually check. It must be true."""
+        self.assertEqual(self.plugin["version"], scan.__version__)
+
+    def test_the_version_is_semver(self):
+        self.assertRegex(scan.__version__, r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$")
+
     def test_descriptions_agree(self):
         self.assertEqual(self.plugin["description"], self.entry["description"])
 

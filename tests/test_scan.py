@@ -330,6 +330,32 @@ class Coverage(unittest.TestCase):
             self.assertIn("SCAN-TOO-LARGE", rule_ids(report))
             self.assertNotEqual(report["verdict"], "ok")
 
+    def test_an_unhashable_file_is_reported_not_dropped(self):
+        """A file that cannot be hashed is not in the lock, so --check is blind
+        to it. Dropping it from the tally as well would leave it in the skill
+        and in no count at all -- a place a payload can sit unobserved."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "SKILL.md").write_text("# hi\n", encoding="utf-8")
+            secret = root / "locked.md"
+            secret.write_text("# nothing\n", encoding="utf-8")
+            try:
+                secret.chmod(0o000)
+                if secret.read_text(encoding="utf-8"):
+                    self.skipTest("this user can read a 0o000 file, so nothing is dropped")
+            except PermissionError:
+                pass
+            except OSError:
+                self.skipTest("permissions not enforced on this platform")
+            try:
+                report = scan.scan(root, RULES)
+            finally:
+                secret.chmod(0o600)
+        report["verdict"] = scan.decide(report)
+        self.assertIn("locked.md", report["files_dropped"])
+        self.assertIn("SCAN-FILE-DROPPED", rule_ids(report))
+        self.assertIn(report["verdict"], ("stop", "review"))
+
     def test_check_catches_a_swapped_binary(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

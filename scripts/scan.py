@@ -327,6 +327,7 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
     hosts: dict[str, int] = {}
     digests: dict[str, str] = {}
     unread: list[str] = []
+    dropped: list[str] = []
     longline: list[str] = []
     links: list[dict] = []
     declares_allowed_tools = False
@@ -343,12 +344,17 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
         # to cover it even when --scan cannot.
         digest = digest_of(path)
         if digest is None:
+            # Dropping it silently would leave a file that is in the skill, not
+            # in the lock, and not in any tally -- the one place a payload can
+            # sit where nothing has looked and nothing will notice it change.
+            dropped.append(rel)
             continue
         digests[rel] = digest
 
         try:
             oversized = path.stat().st_size > MAX_BYTES
         except OSError:
+            dropped.append(rel)
             continue
         if not is_readable_text(path) or oversized:
             if oversized:
@@ -357,6 +363,7 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
 
         text = read_text(path)
         if text is None:
+            dropped.append(rel)
             continue
         scanned += 1
         is_skill = is_skill or path.name.lower() == SKILL_NAME
@@ -382,6 +389,8 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
         findings.append(synthetic(rules, "LINK-TARGET-NAMED", extra=f" -> {named_link}"))
     for rel in unread:
         findings.append(synthetic(rules, "SCAN-TOO-LARGE", file=rel))
+    for rel in dropped:
+        findings.append(synthetic(rules, "SCAN-FILE-DROPPED", file=rel))
     for rel in longline:
         findings.append(synthetic(rules, "OBFUS-LONG-LINE", file=rel))
     for link in links:
@@ -406,6 +415,7 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
         "files_scanned": scanned,
         "files_hashed": len(digests),
         "files_unread": sorted(unread),
+        "files_dropped": sorted(dropped),
         "symlinks": links,
         "findings": findings,
         "mentions": mentions,
@@ -626,11 +636,16 @@ def render(report: dict, color: bool) -> str:
     verdict = report["verdict"]
     label, advice = VERDICT_TEXT[verdict]
     unread = len(report["files_unread"])
+    dropped = len(report.get("files_dropped", []))
     tally = f"  {report['files_scanned']} files read, {report['files_hashed']} hashed"
+    if unread:
+        tally += f", {unread} too large to read"
+    if dropped:
+        tally += f", {dropped} could not be read at all"
     out = [
         "",
         f"  trust-me-bro  {report['target']}",
-        tally + (f", {unread} too large to read" if unread else ""),
+        tally,
         "",
         f"  {paint(label, COLORS[verdict])}  {advice}",
         "",

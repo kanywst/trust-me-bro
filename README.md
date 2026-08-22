@@ -101,7 +101,7 @@ python3 scripts/scan.py ./some-skill
 
 The two `RCE-PIPE-*` rules split one line between them, and the split is the honest part. `curl … | bash` executes the download, and that is critical. `curl … | python3 -c '…'` hands the download to a local program, and whether that program parses it or runs it cannot be read off the command line — `bash -c 'read l; $l'` names nothing a pattern can look for. So the second rule reports every one of them at `high` instead of guessing, and the verdict floor stays at **REVIEW**, exit `1`. Only the forms that can be shown to execute the download — `. /dev/stdin`, `eval`, `exec`, `$(cat)` — are promoted back to critical. Enumerating attack idioms is a race a scanner loses; not depending on winning it is the design.
 
-Plus the boring but load-bearing ones: unpinned sources, runtime installs, wildcard tool grants, root, and every external host the skill talks to. A file too large for the rules to read is itself a finding, because "we did not look inside that one" should never be silent.
+Plus the boring but load-bearing ones: unpinned sources, runtime installs, wildcard tool grants, root, and every external host the skill talks to. A file too large for the rules to read is itself a finding, and so is one that could not be opened at all, because "we did not look inside that one" should never be silent.
 
 **Provenance.** Signed, hashed, or neither. It will almost always say neither. That is a fact about the ecosystem in 2026, not an accusation about the skill you are looking at.
 

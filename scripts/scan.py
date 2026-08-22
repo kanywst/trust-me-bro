@@ -734,7 +734,10 @@ def render(report: dict, color: bool) -> str:
     legs = report["legs_present"]
     # "not seen" is a claim about text that was read. With nothing read it would
     # be a claim about nothing, which is the reassurance this tool must not give.
-    absent = "not seen" if verdict != "nothing-read" else "nothing read"
+    # Keyed off the count, not the verdict: a high finding that needs no reading
+    # -- a skipped vendor tree, an escaping symlink -- outranks nothing-read in
+    # decide() and would otherwise put "not seen" back on an empty scan.
+    absent = "not seen" if report["files_scanned"] else "nothing read"
     out.append("  Lethal trifecta")
     for leg in ("private", "untrusted", "exfil"):
         mark = "x" if leg in legs else " "

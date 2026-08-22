@@ -29,7 +29,7 @@
     {
       "id": "PRIV-LLM-KEY",
       "leg": "private",
-      "pattern": "ANTHROPIC_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY|GROQ_API_KEY|OPENROUTER_API_KEY|[A-Z0-9_]*_API_KEY|[A-Z0-9_]*_SECRET\\b",
+      "pattern": "\\b(ANTHROPIC|OPENAI|GEMINI|GROQ|OPENROUTER|HUGGINGFACE|COHERE|MISTRAL)_API_KEY\\b|(?-i:\\b[A-Z0-9]{1,20}(_[A-Z0-9]{1,20}){0,8}_(API_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN)\\b)",
       "title": "reads API keys"
     },
     {
@@ -134,9 +134,18 @@
       "id": "RCE-PIPE-SHELL",
       "severity": "critical",
       "negation_safe": true,
-      "pattern": "(curl|wget)\\s[^\\n|]*(https?://|\\$\\{?[A-Za-z_])[^\\n|]*\\|\\s*(sudo\\s+)?((ba|z|k)?sh|python[0-9.]*|node|ruby|perl)\\b|iex\\s*\\(\\s*new-object",
+      "pattern": "(curl|wget)\\s[^\\n|]*(https?://|\\$\\{?[A-Za-z_])[^\\n|]*\\|\\s*(sudo\\s+)?((((ba|z|k)?sh)(?!(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,12}\\s+(-{1,2}c|-[A-Za-z]{1,8}c)\\b(?![^\\n#]*(/dev/stdin|\\beval\\b|\\bexec(Sync|File|FileSync)?\\b|\\bos\\.system\\b|\\bsystem\\s*\\(|\\bspawn(Sync)?\\b|child_process|\\bsubprocess\\b|\\bpopen\\b|%x[\\(\\[{]|\\$\\(|`\\s*cat\\b)))|(python[0-9.]*|node|ruby|perl)(?!(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,12}\\s+(-{1,2}(c|e|m|ne|pe|eval|command)|-[A-Za-z]{1,8}[cem])\\b(?![^\\n#]*(/dev/stdin|\\beval\\b|\\bexec(Sync|File|FileSync)?\\b|\\bos\\.system\\b|\\bsystem\\s*\\(|\\bspawn(Sync)?\\b|child_process|\\bsubprocess\\b|\\bpopen\\b|%x[\\(\\[{]|\\$\\(|`\\s*cat\\b))))\\b)|iex\\s*\\(\\s*new-object",
       "title": "downloads a remote script and executes it",
       "why": "The code that actually runs is whatever that URL serves at the moment you run it. Nothing you review here binds it.",
+      "prose_is_code": true
+    },
+    {
+      "id": "RCE-PIPE-INTERPRETER",
+      "severity": "high",
+      "negation_safe": true,
+      "pattern": "(curl|wget)\\s[^\\n|]*(https?://|\\$\\{?[A-Za-z_])[^\\n|]*\\|\\s*(sudo\\s+)?((ba|z|k)?sh|python[0-9.]*|node|ruby|perl)(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,12}\\s+(-{1,2}(c|e|m|ne|pe|eval|command)|-[A-Za-z]{1,8}[cem])\\b(?![^\\n#]*(/dev/stdin|\\beval\\b|\\bexec(Sync|File|FileSync)?\\b|\\bos\\.system\\b|\\bsystem\\s*\\(|\\bspawn(Sync)?\\b|child_process|\\bsubprocess\\b|\\bpopen\\b|%x[\\(\\[{]|\\$\\(|`\\s*cat\\b))",
+      "title": "pipes a remote download into an interpreter",
+      "why": "The inline program decides what happens to the download. Whether that is parsing it or running it cannot be read off the command line, so read the program. This is the same line RCE-PIPE-SHELL would call critical if it could prove the download gets executed.",
       "prose_is_code": true
     },
     {
@@ -276,11 +285,67 @@
       "why": "The field is optional in the Agent Skills spec, so most skills omit it. It means the runtime, not the skill, decides what it can reach."
     },
     {
+      "id": "SCAN-VENDOR-SKIPPED",
+      "severity": "high",
+      "pattern": null,
+      "title": "a vendored or build directory was not read at all",
+      "why": "Nothing in it was read or hashed, so no rule has looked at code that ships with this skill and --check cannot see it change. A skill has no reason to vendor a dependency tree, and it is the obvious place to put something you do not want read. Read it yourself, or ask why it is here."
+    },
+    {
+      "id": "SCAN-DIR-SKIPPED",
+      "severity": "low",
+      "pattern": null,
+      "title": "a metadata directory was skipped",
+      "why": "Version-control and cache directories are not walked, so nothing in this one was read or hashed and --check cannot see it change. Ordinary in a checkout, but worth knowing that git hooks live in there."
+    },
+    {
+      "id": "SCAN-NOT-READ",
+      "severity": "low",
+      "pattern": null,
+      "title": "a file was hashed but no rule read it",
+      "why": "Only the hash covers it: either no rule parses its type, or it could not be opened. --check will still catch it changing, but nothing here has looked inside."
+    },
+    {
+      "id": "SCAN-FILE-DROPPED",
+      "severity": "high",
+      "pattern": null,
+      "title": "a file could not be read at all",
+      "why": "It could not be hashed, so it is not in the lock and --check will not notice it changing. No rule has looked inside it either. This is the one place a payload can sit where nothing here has looked, so look yourself."
+    },
+    {
       "id": "SCAN-TOO-LARGE",
       "severity": "high",
       "pattern": null,
       "title": "a file was too large to read",
       "why": "It is hashed and covered by --check, but no rule has looked inside it. Read it yourself or ask why a skill ships a file that big."
+    },
+    {
+      "id": "LINK-ESCAPES-TREE",
+      "severity": "critical",
+      "pattern": null,
+      "title": "a symlink points outside the skill",
+      "why": "Whatever reads this skill reads that file instead. It is not followed here, and it should not be followed by your agent either."
+    },
+    {
+      "id": "LINK-TARGET-NAMED",
+      "severity": "low",
+      "pattern": null,
+      "title": "the directory you named is a symlink",
+      "why": "Followed, because you named it and pointing a skills directory at a dotfiles checkout is ordinary. Links found inside a skill are not followed, because the skill chose those. What actually got scanned is the target, so check that it is what you meant to audit."
+    },
+    {
+      "id": "LINK-PRESENT",
+      "severity": "medium",
+      "pattern": null,
+      "title": "the skill contains a symlink",
+      "why": "It stays inside the skill, but a link is an indirection that review tends to skip. It is hashed by its target path, so retargeting it shows up as drift."
+    },
+    {
+      "id": "OBFUS-LONG-LINE",
+      "severity": "critical",
+      "pattern": null,
+      "title": "a line is too long to review or to match in full",
+      "why": "Real code and real prose do not run to thousands of characters on one line. The line is matched in overlapping windows and again with its padding compressed, but full pattern coverage cannot be guaranteed at this length, so the verdict does not get to be quiet about it. The line was written to be unreadable."
     }
   ],
   "host_allowlist": [

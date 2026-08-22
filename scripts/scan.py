@@ -19,9 +19,14 @@ import re
 import sys
 from pathlib import Path
 
+# The one place the version is written. The plugin manifests are checked
+# against it in CI, so a release cannot ship three numbers that disagree.
+__version__ = "0.1.0"
+
 RULES_PATH = Path(__file__).resolve().parent.parent / "rules" / "rules.json"
 LOCK_NAME = ".trustmebro.lock"
 IGNORE_NAME = ".trustmebro.ignore"
+SKILL_NAME = "skill.md"
 
 TEXT_SUFFIXES = {
     ".md",
@@ -55,9 +60,51 @@ TEXT_SUFFIXES = {
     ".conf",
     ".xml",
     ".html",
+    # Anything a skill could plausibly ship as code. A language the rules cannot
+    # open is a language a payload can hide in, so the list errs towards reading.
+    ".php",
+    ".lua",
+    ".pl",
+    ".pm",
+    ".r",
+    ".swift",
+    ".kt",
+    ".kts",
+    ".java",
+    ".cs",
+    ".groovy",
+    ".ex",
+    ".exs",
+    ".clj",
+    ".scala",
+    ".dart",
+    ".vim",
+    ".el",
+    ".sql",
+    ".awk",
+    ".tcl",
+    ".ipynb",
+    ".applescript",
+    ".nu",
+    ".ps",
 }
-SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".mypy_cache"}
+# Vendored or built code that ships with the skill. Not walked, for speed, and
+# reported loudly because of it: nothing in here is read, hashed or locked, and
+# a skill has no reason to carry a dependency tree in the first place.
+VENDOR_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "vendor", "target", "site-packages"}
+# Version control and caches. Skipped for the same reason and reported quietly,
+# because every checkout has them and they are not the skill's own code.
+META_DIRS = {".git", "__pycache__", ".mypy_cache", ".ruff_cache", ".pytest_cache", ".tox"}
+SKIP_DIRS = VENDOR_DIRS | META_DIRS
 MAX_BYTES = 2_000_000
+# No reviewable line is this long. A single regex call is bounded to this many
+# characters so a hostile skill cannot hand the engine a 50 KB line and stall
+# the scan. Longer lines are matched in overlapping windows rather than
+# truncated: truncating would let a line pad past the limit and hide the real
+# payload behind the very guard that exists to protect the scan. The overlap
+# is wider than any pattern can span, so nothing falls between two windows.
+MAX_LINE = 2_000
+WINDOW_OVERLAP = 400
 
 # A detached signature or an attestation. A certificate or a public key is not
 # one: shipping cosign.pub proves nothing was signed, only that someone has a
@@ -106,27 +153,62 @@ def load_rules(path: Path = RULES_PATH) -> dict:
     return raw
 
 
-def iter_files(root: Path):
-    """Every file in the target, including binaries. Filtering happens later.
+def iter_files(root: Path, links: list[dict] | None = None, skipped: list[str] | None = None):
+    """Every real file in the target, including binaries. Filtering happens later.
 
     The lock has to cover files the rules cannot read, or swapping a binary
     payload would slip past --check.
+
+    Symlinks are never followed and never read. A skill can ship
+    `notes.md -> ~/.aws/credentials`, and following it would make this tool
+    print the reader's own secrets into its own report, which is the exact
+    failure it exists to prevent. They are collected in `links` instead so the
+    caller can report them.
     """
-    if root.is_file():
+    if root.is_file() and not root.is_symlink():
         yield root
         return
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for name in sorted(dirnames):
+            directory = Path(dirpath) / name
+            if directory.is_symlink() and links is not None:
+                links.append(link_record(root, directory))
+        if skipped is not None:
+            # Not walked means not hashed and not in the lock, so the caller has
+            # to be able to say which places this scan does not reach.
+            skipped += [relative_name(root, Path(dirpath) / d) for d in sorted(dirnames) if d in SKIP_DIRS]
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not (Path(dirpath) / d).is_symlink()]
         for name in sorted(filenames):
             path = Path(dirpath) / name
             if name in (LOCK_NAME, IGNORE_NAME):
                 continue  # the detector's own bookkeeping is not a target
+            if path.is_symlink():
+                if links is not None:
+                    links.append(link_record(root, path))
+                continue
             try:
                 if path.resolve() == RULES_PATH:
                     continue
             except OSError:
-                continue
+                # Cannot tell whether this is the rule file. Dropping it here
+                # would leave it unhashed, uncounted and absent from the lock,
+                # which is the silent gap SCAN-FILE-DROPPED exists to close.
+                # Let it through and let the hash step report it if it fails.
+                pass
             yield path
+
+
+def link_record(root: Path, path: Path) -> dict:
+    base = (root if root.is_dir() else root.parent).resolve()
+    try:
+        target = os.readlink(path)
+    except OSError:
+        target = "?"
+    try:
+        escapes = not path.resolve().is_relative_to(base)
+    except (OSError, ValueError):
+        escapes = True
+    return {"file": relative_name(root, path), "target": str(target), "escapes": escapes}
 
 
 def is_readable_text(path: Path) -> bool:
@@ -153,9 +235,21 @@ def digest_of(path: Path) -> str | None:
     return digest.hexdigest()
 
 
-def trim(line: str, limit: int = 120) -> str:
+def trim(line: str, limit: int = 120, around: int | None = None) -> str:
+    """Quote the line, and for a long one quote the part the rule matched.
+
+    Cutting at the first 120 characters shows padding when a line was padded,
+    which is the one case where the quote matters most: the reader is told a
+    command fired and handed a screenful of filler as the evidence for it.
+    """
+    lead = len(line) - len(line.lstrip())
     line = line.strip()
-    return line if len(line) <= limit else line[: limit - 1] + "…"
+    if len(line) <= limit:
+        return line
+    if around is None:
+        return line[: limit - 1] + "…"
+    start = max(0, min(around - lead - limit // 3, len(line) - limit))
+    return ("…" if start else "") + line[start : start + limit] + ("…" if start + limit < len(line) else "")
 
 
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
@@ -273,19 +367,32 @@ def synthetic(rules: dict, rule_id: str, file: str = "-", extra: str = "") -> di
     }
 
 
-def scan(root: Path, rules: dict) -> dict:
+def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
+    """`named_link` is the symlink the caller typed, already resolved to `root`.
+
+    It is reported but not refused: pointing a skills directory at a dotfiles
+    checkout is how most people install skills, and refusing it would break the
+    ordinary case to close a hole that only exists for single files. Links found
+    *inside* a skill stay unfollowed, because the skill chose those.
+    """
     findings: list[dict] = []
     mentions: list[dict] = []
     legs: dict[str, list[dict]] = {"private": [], "untrusted": [], "exfil": []}
     hosts: dict[str, int] = {}
     digests: dict[str, str] = {}
     unread: list[str] = []
+    dropped: list[str] = []
+    notread: list[str] = []
+    skipped: list[str] = []
+    longline: list[str] = []
+    links: list[dict] = []
     declares_allowed_tools = False
+    is_skill = False
     scanned = 0
 
     allowlist = set(rules["host_allowlist"])
 
-    for path in iter_files(root):
+    for path in iter_files(root, links, skipped):
         rel = relative_name(root, path)
 
         # Hash first and unconditionally. A file the rules cannot read is
@@ -293,22 +400,31 @@ def scan(root: Path, rules: dict) -> dict:
         # to cover it even when --scan cannot.
         digest = digest_of(path)
         if digest is None:
+            # Dropping it silently would leave a file that is in the skill, not
+            # in the lock, and not in any tally -- the one place a payload can
+            # sit where nothing has looked and nothing will notice it change.
+            dropped.append(rel)
             continue
         digests[rel] = digest
 
         try:
             oversized = path.stat().st_size > MAX_BYTES
         except OSError:
+            # Hashed already, so the lock covers it. Only the reading failed.
+            notread.append(rel)
             continue
         if not is_readable_text(path) or oversized:
-            if oversized:
-                unread.append(rel)
+            (unread if oversized else notread).append(rel)
             continue
 
         text = read_text(path)
         if text is None:
+            notread.append(rel)
             continue
         scanned += 1
+        is_skill = is_skill or path.name.lower() == SKILL_NAME
+        if any(len(line) > MAX_LINE for line in text.splitlines()):
+            longline.append(rel)
 
         result = scan_text(rel, path, text, rules)
         findings += result["findings"]
@@ -320,10 +436,30 @@ def scan(root: Path, rules: dict) -> dict:
             if host not in allowlist:
                 hosts[host] = hosts.get(host, 0) + 1
 
-    if not declares_allowed_tools and scanned:
+    # `allowed-tools` is an Agent Skills frontmatter field. Reporting it absent
+    # from an MCP config or a bare script is noise about a field that does not
+    # exist there, and noise is how a real finding gets scrolled past.
+    if is_skill and not declares_allowed_tools:
         findings.append(synthetic(rules, "META-NO-ALLOWED-TOOLS"))
+    if named_link is not None:
+        findings.append(synthetic(rules, "LINK-TARGET-NAMED", extra=f" -> {named_link}"))
     for rel in unread:
         findings.append(synthetic(rules, "SCAN-TOO-LARGE", file=rel))
+    for rel in dropped:
+        findings.append(synthetic(rules, "SCAN-FILE-DROPPED", file=rel))
+    for rel in notread:
+        findings.append(synthetic(rules, "SCAN-NOT-READ", file=rel))
+    for rel in skipped:
+        vendored = Path(rel).name in VENDOR_DIRS
+        findings.append(synthetic(rules, "SCAN-VENDOR-SKIPPED" if vendored else "SCAN-DIR-SKIPPED", file=rel))
+    for rel in longline:
+        findings.append(synthetic(rules, "OBFUS-LONG-LINE", file=rel))
+    for link in links:
+        # A link is hashed by where it points, so retargeting it is drift even
+        # though no byte inside the skill changed.
+        digests[link["file"]] = "symlink:" + hashlib.sha256(link["target"].encode("utf-8")).hexdigest()
+        rule = "LINK-ESCAPES-TREE" if link["escapes"] else "LINK-PRESENT"
+        findings.append(synthetic(rules, rule, file=link["file"], extra=f" -> {link['target']}"))
 
     ignored = load_ignores(root)
     if ignored:
@@ -340,6 +476,10 @@ def scan(root: Path, rules: dict) -> dict:
         "files_scanned": scanned,
         "files_hashed": len(digests),
         "files_unread": sorted(unread),
+        "files_dropped": sorted(dropped),
+        "files_not_read": sorted(notread),
+        "dirs_skipped": sorted(skipped),
+        "symlinks": links,
         "findings": findings,
         "mentions": mentions,
         "legs": legs,
@@ -352,18 +492,112 @@ def scan(root: Path, rules: dict) -> dict:
     }
 
 
+class _Hit:
+    """A match position in the original line, not in the window.
+
+    `exact` is False when the match was found in a compressed copy of the line,
+    where no position in the original survives. Callers must not judge context
+    from an invented offset: a fabricated 0 reads as "outside any inline code
+    span", which would demote a real command to prose and quietly drop it from
+    the trifecta.
+
+    `quote` and `quote_at` carry the compressed text and the offset the match
+    landed at inside it, so the report can still show the command rather than
+    whichever 120 characters happen to come first.
+    """
+
+    __slots__ = ("_start", "exact", "quote", "quote_at")
+
+    def __init__(self, start: int, exact: bool = True, quote: str = "", quote_at: int = 0):
+        self._start = start
+        self.exact = exact
+        self.quote = quote
+        self.quote_at = quote_at
+
+    def start(self) -> int:
+        return self._start
+
+
+RUN_RE = re.compile(r"(.)\1{7,}")
+
+
+def squeeze(line: str) -> str:
+    """Collapse padding while keeping the shape of a command intact.
+
+    Windowing alone is not enough. Several patterns have to span a gap, so
+    `curl <2500 characters of filler> | bash` fits in no single window and the
+    rule silently stops firing. Padding is compressible by construction, so
+    compress it: runs of one character, runs of whitespace, and a token repeated
+    over and over all shrink to a few copies. What is left still looks like the
+    command it is.
+    """
+    line = RUN_RE.sub(lambda match: match.group(1) * 8, line)
+    # Per distinct token, not per consecutive run: filler is usually a short
+    # cycle such as "-H x -H x -H x", where no two neighbours are equal.
+    seen: dict[str, int] = {}
+    out = []
+    for token in line.split():
+        count = seen.get(token, 0) + 1
+        seen[token] = count
+        if count <= 3:
+            out.append(token)
+    return " ".join(out)
+
+
+def search_bounded(pattern: re.Pattern, line: str):
+    """Search the whole line without ever handing the engine an unbounded one.
+
+    Truncating instead would let a hostile line pad past the limit and hide its
+    payload behind the guard that exists to keep the scan fast. A line this long
+    also raises OBFUS-LONG-LINE, which is critical on its own, so a pattern that
+    still slips through cannot quietly downgrade the verdict.
+    """
+    if len(line) <= MAX_LINE:
+        return pattern.search(line)
+
+    step = MAX_LINE - WINDOW_OVERLAP
+    for offset in range(0, len(line), step):
+        found = pattern.search(line[offset : offset + MAX_LINE])
+        if found:
+            return _Hit(offset + found.start())
+
+    compressed = squeeze(line)
+    if len(compressed) < len(line):
+        for offset in range(0, max(len(compressed), 1), step):
+            found = pattern.search(compressed[offset : offset + MAX_LINE])
+            if found:
+                # No position in the original line survives compression, so the
+                # match is marked inexact and the caller treats it as code. The
+                # offset inside the compressed copy is kept, because that copy
+                # is what the report quotes and it has to quote the command.
+                return _Hit(0, exact=False, quote=compressed, quote_at=offset + found.start())
+    return None
+
+
 def match_lines(
     pattern: re.Pattern, lines: list[str], mask: list[bool], cap: int = 3, negation_safe: bool = False
 ) -> list[dict]:
     hits = []
     for index, line in enumerate(lines):
-        match = pattern.search(line)
+        match = search_bounded(pattern, line)
         if not match:
             continue
         if negation_safe and NEGATION_RE.search(line[: match.start()]):
             continue
-        is_code = mask[index] or in_inline_code(line, match.start())
-        hits.append({"line": index + 1, "text": trim(line), "context": "code" if is_code else "prose"})
+        # An inexact match came out of a compressed copy of the line, where no
+        # original position exists. Treat it as code: the alternative is to
+        # infer prose from an invented offset and demote a real command.
+        exact = getattr(match, "exact", True)
+        is_code = mask[index] or not exact or in_inline_code(line, match.start())
+        # An inexact match has no position in the original, so quoting around
+        # one is impossible. Quote the compressed copy the match was found in
+        # instead, which keeps the shape of the command, and say that is what
+        # it is rather than passing filler off as the evidence.
+        text = trim(line, around=match.start()) if exact else trim(match.quote, around=match.quote_at)
+        hit = {"line": index + 1, "text": text, "context": "code" if is_code else "prose"}
+        if not exact:
+            hit["compressed"] = True
+        hits.append(hit)
         # Keep looking past prose matches: one real command outranks any number
         # of mentions, and the caller only ever shows `cap` of them.
         if len(hits) >= cap and any(h["context"] == "code" for h in hits):
@@ -444,6 +678,13 @@ def decide(report: dict) -> str:
         return "stop"
     if "high" in severities:
         return "review"
+    # Nothing was read, so nothing was cleared. An empty directory, a mistyped
+    # path and a folder of binaries all land here, and all three would otherwise
+    # come back "no flagged patterns found" with exit 0 -- a green light from a
+    # scan that never happened. It sits above read-it because a result nobody
+    # can rely on is worse than a result that merely reaches the network.
+    if report["files_scanned"] == 0:
+        return "nothing-read"
     if "medium" in severities or report["external_hosts"] or len(report["legs_present"]) >= 2:
         return "read-it"
     return "ok"
@@ -454,10 +695,17 @@ def decide(report: dict) -> str:
 VERDICT_TEXT = {
     "stop": ("STOP", "Do not install this until someone explains it."),
     "review": ("REVIEW", "Read the flagged lines yourself before installing."),
+    "nothing-read": ("NOTHING READ", "No file here could be read. This is not a clean result, it is no result."),
     "read-it": ("READ IT", "Nothing alarming, but it reaches outside your machine."),
     "ok": ("LOOKS PLAIN", "No outbound reach and no flagged patterns found."),
 }
-COLORS = {"stop": "\033[31m", "review": "\033[33m", "read-it": "\033[36m", "ok": "\033[32m"}
+COLORS = {
+    "stop": "\033[31m",
+    "review": "\033[33m",
+    "nothing-read": "\033[33m",
+    "read-it": "\033[36m",
+    "ok": "\033[32m",
+}
 SEV_MARK = {"critical": "!!", "high": "! ", "medium": "~ ", "low": ". "}
 
 
@@ -468,21 +716,32 @@ def render(report: dict, color: bool) -> str:
     verdict = report["verdict"]
     label, advice = VERDICT_TEXT[verdict]
     unread = len(report["files_unread"])
+    dropped = len(report.get("files_dropped", []))
     tally = f"  {report['files_scanned']} files read, {report['files_hashed']} hashed"
+    if unread:
+        tally += f", {unread} too large to read"
+    if dropped:
+        tally += f", {dropped} could not be hashed"
     out = [
         "",
         f"  trust-me-bro  {report['target']}",
-        tally + (f", {unread} too large to read" if unread else ""),
+        tally,
         "",
         f"  {paint(label, COLORS[verdict])}  {advice}",
         "",
     ]
 
     legs = report["legs_present"]
+    # "not seen" is a claim about text that was read. With nothing read it would
+    # be a claim about nothing, which is the reassurance this tool must not give.
+    # Keyed off the count, not the verdict: a high finding that needs no reading
+    # -- a skipped vendor tree, an escaping symlink -- outranks nothing-read in
+    # decide() and would otherwise put "not seen" back on an empty scan.
+    absent = "not seen" if report["files_scanned"] else "nothing read"
     out.append("  Lethal trifecta")
     for leg in ("private", "untrusted", "exfil"):
         mark = "x" if leg in legs else " "
-        detail = ", ".join(sorted({e["title"] for e in report["legs"][leg]})[:3]) or "not seen"
+        detail = ", ".join(sorted({e["title"] for e in report["legs"][leg]})[:3]) or absent
         out.append(f"    [{mark}] {LEG_LABEL[leg]:<18} {detail}")
     if report["trifecta"]:
         out.append(
@@ -510,8 +769,12 @@ def render(report: dict, color: bool) -> str:
         for finding in report["findings"]:
             mark = SEV_MARK[finding["severity"]]
             out.append(f"    {mark} {finding['id']}  {finding['title']}")
-            for hit in finding["hits"]:
-                out.append(f"         {finding['file']}:{hit['line']}  {hit['text']}")
+            if finding["hits"]:
+                for hit in finding["hits"]:
+                    note = "  (padding compressed)" if hit.get("compressed") else ""
+                    out.append(f"         {finding['file']}:{hit['line']}  {hit['text']}{note}")
+            elif finding["file"] != "-":
+                out.append(f"         {finding['file']}")
             out.append(f"         why: {finding['why']}")
         out.append("")
 
@@ -567,12 +830,13 @@ def check_lock(root: Path, report: dict) -> tuple[int, str]:
 
 # ---------------------------------------------------------------------- main
 
-EXIT = {"stop": 2, "review": 1, "read-it": 0, "ok": 0}
+EXIT = {"stop": 2, "review": 1, "nothing-read": 1, "read-it": 0, "ok": 0}
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Audit an agent skill or plugin before installing it.")
     parser.add_argument("target", help="path to a skill directory or a single file")
+    parser.add_argument("--version", action="version", version=f"trust-me-bro {__version__}")
     parser.add_argument("--json", action="store_true", dest="as_json", help="machine-readable output")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--pin", action="store_true", help=f"write {LOCK_NAME} recording the version you approved")
@@ -580,7 +844,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-color", action="store_true")
     args = parser.parse_args(argv)
 
-    root = Path(args.target).resolve()
+    # resolve() dereferences the last component, so this has to run first. A
+    # skill can ship `SKILL.md -> ~/.aws/credentials`, and the single-file
+    # invocation is the one the README puts in front of people. Resolving it
+    # would read and print the target's contents, which is exactly the failure
+    # the walk's own symlink handling exists to prevent.
+    named = Path(args.target)
+    named_link = None
+    if named.is_symlink():
+        named_link = os.readlink(named)
+        if not named.is_dir():
+            # A single file reached through a link is the attack: the report
+            # would quote lines from whatever it points at. Nothing legitimate
+            # needs it, unlike a skills directory linked to a dotfiles checkout,
+            # which is how most people install skills and is followed below.
+            print(f"trust-me-bro: {args.target} is a symlink to {named_link}.", file=sys.stderr)
+            print("  Not following it. Point at the real file if that is what you meant.", file=sys.stderr)
+            return 3
+
+    root = named.resolve()
     if not root.exists():
         print(f"trust-me-bro: no such path: {root}", file=sys.stderr)
         return 3
@@ -591,7 +873,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"trust-me-bro: cannot load rules: {error}", file=sys.stderr)
         return 3
 
-    report = scan(root, rules)
+    report = scan(root, rules, named_link=named_link)
     report["verdict"] = decide(report)
 
     if args.check:

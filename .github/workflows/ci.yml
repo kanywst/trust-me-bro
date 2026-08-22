@@ -90,8 +90,49 @@ jobs:
           set -e
           test "$code" -eq 1 || { echo "::error::expected drift exit 1, got $code"; exit 1; }
 
-      - name: Scanning this repo must not stop on its own rule file
-        run: python scripts/scan.py rules --no-color
+      # The rule file names every pattern it hunts for, so reading it would
+      # trip all of them. It is excluded from the walk instead. Asserting the
+      # exclusion is the point: the old check ran the scan and looked at the
+      # exit code, which the exclusion itself made vacuous.
+      - name: The scanner never reads its own rule file
+        run: |
+          python - <<'PY'
+          import json, subprocess, sys
+          out = subprocess.run(
+              [sys.executable, "scripts/scan.py", "rules", "--json"], capture_output=True, text=True
+          )
+          report = json.loads(out.stdout)
+          if report["files_scanned"] or report["digests"]:
+              print(f"::error::rules/rules.json was read: {report['digests']}")
+              sys.exit(1)
+          print("rule file excluded from the walk")
+          PY
+
+      # The one exit code a CI pipeline must never get wrong. A target that
+      # read nothing is not a target that passed, and 0 here would be a green
+      # light from a scan that never opened a file.
+      - name: A target with nothing readable must not exit 0
+        run: |
+          mkdir -p "$RUNNER_TEMP/nothing"
+          set +e
+          python scripts/scan.py "$RUNNER_TEMP/nothing" --no-color
+          code=$?
+          set -e
+          test "$code" -eq 1 || { echo "::error::expected exit 1, got $code"; exit 1; }
+
+      - name: The reported version is the version the manifests ship
+        run: |
+          python - <<'PY'
+          import json, subprocess, sys
+          manifest = json.load(open(".claude-plugin/plugin.json"))["version"]
+          reported = subprocess.run(
+              [sys.executable, "scripts/scan.py", "--version"], capture_output=True, text=True
+          ).stdout.split()[-1]
+          if manifest != reported:
+              print(f"::error::plugin.json says {manifest}, scan.py --version says {reported}")
+              sys.exit(1)
+          print(f"version {reported}")
+          PY
 
   lint:
     name: lint

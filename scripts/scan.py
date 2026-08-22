@@ -201,9 +201,21 @@ def digest_of(path: Path) -> str | None:
     return digest.hexdigest()
 
 
-def trim(line: str, limit: int = 120) -> str:
+def trim(line: str, limit: int = 120, around: int | None = None) -> str:
+    """Quote the line, and for a long one quote the part the rule matched.
+
+    Cutting at the first 120 characters shows padding when a line was padded,
+    which is the one case where the quote matters most: the reader is told a
+    command fired and handed a screenful of filler as the evidence for it.
+    """
+    lead = len(line) - len(line.lstrip())
     line = line.strip()
-    return line if len(line) <= limit else line[: limit - 1] + "…"
+    if len(line) <= limit:
+        return line
+    if around is None:
+        return line[: limit - 1] + "…"
+    start = max(0, min(around - lead - limit // 3, len(line) - limit))
+    return ("…" if start else "") + line[start : start + limit] + ("…" if start + limit < len(line) else "")
 
 
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
@@ -532,7 +544,15 @@ def match_lines(
         # infer prose from an invented offset and demote a real command.
         exact = getattr(match, "exact", True)
         is_code = mask[index] or not exact or in_inline_code(line, match.start())
-        hits.append({"line": index + 1, "text": trim(line), "context": "code" if is_code else "prose"})
+        # An inexact match has no position in the original, so quoting around
+        # one is impossible. Quote the compressed copy the match was found in
+        # instead, which keeps the shape of the command, and say that is what
+        # it is rather than passing filler off as the evidence.
+        text = trim(line, around=match.start()) if exact else trim(squeeze(line))
+        hit = {"line": index + 1, "text": text, "context": "code" if is_code else "prose"}
+        if not exact:
+            hit["compressed"] = True
+        hits.append(hit)
         # Keep looking past prose matches: one real command outranks any number
         # of mentions, and the caller only ever shows `cap` of them.
         if len(hits) >= cap and any(h["context"] == "code" for h in hits):
@@ -703,7 +723,8 @@ def render(report: dict, color: bool) -> str:
             out.append(f"    {mark} {finding['id']}  {finding['title']}")
             if finding["hits"]:
                 for hit in finding["hits"]:
-                    out.append(f"         {finding['file']}:{hit['line']}  {hit['text']}")
+                    note = "  (padding compressed)" if hit.get("compressed") else ""
+                    out.append(f"         {finding['file']}:{hit['line']}  {hit['text']}{note}")
             elif finding["file"] != "-":
                 out.append(f"         {finding['file']}")
             out.append(f"         why: {finding['why']}")

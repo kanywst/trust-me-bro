@@ -186,8 +186,14 @@ class Negation(unittest.TestCase):
             ("python3 -W ignore -c 'print(1)'", "RCE-PIPE-INTERPRETER"),
             ("bash -O extglob -c 'echo hi'", "RCE-PIPE-INTERPRETER"),
             ("python3 -W ignore -c 'exec(x)'", "RCE-PIPE-SHELL"),
-            # `--` is not a flag taking an argument, so this stays critical.
+            # Short flags combined into one token.
+            ("python3 -uc 'print(1)'", "RCE-PIPE-INTERPRETER"),
+            ("bash -ic 'echo hi'", "RCE-PIPE-INTERPRETER"),
+            ('python3 -uc "exec(x)"', "RCE-PIPE-SHELL"),
+            # `--` is not a flag taking an argument, and `-s` is not a combined
+            # cluster ending in c, so both of these stay critical.
             ("bash -s -- --quiet", "RCE-PIPE-SHELL"),
+            ("bash -s", "RCE-PIPE-SHELL"),
             ("bash --norc -c '. /dev/stdin'", "RCE-PIPE-SHELL"),
             ("python3 -u -c 'exec(x)'", "RCE-PIPE-SHELL"),
         ]

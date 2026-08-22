@@ -28,6 +28,7 @@ First release. A pre-install audit for agent skills, plugins, and MCP servers: o
 - No single regex is ever handed an unbounded line. Lines over 2000 characters are matched in overlapping windows and again with their padding compressed, so a payload cannot hide behind the guard that keeps the scan fast. Such a line is reported as `critical` either way, because full pattern coverage cannot be promised at that length.
 - A match found only in the compressed copy of a line is marked inexact and treated as code. Inferring prose from an offset that does not exist in the original would quietly demote a real command.
 - A target where nothing could be read reports `NOTHING READ` and exits `1`, never `0`. A scan that opened no files has cleared nothing.
+- Every place the scan does not reach is named: `SCAN-DIR-SKIPPED` for a vendored or build directory that is not walked and therefore not locked, and `SCAN-NOT-READ` for a file that is hashed but whose type no rule can parse.
 - A file the scanner cannot open at all is reported as `SCAN-FILE-DROPPED` rather than skipped. It is absent from the lock, so `--check` cannot see it change; being absent from the tally as well would leave it in the skill and in no count at all.
 
 [Unreleased]: https://github.com/kanywst/trust-me-bro/compare/v0.1.0...HEAD

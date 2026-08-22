@@ -119,7 +119,7 @@ def load_rules(path: Path = RULES_PATH) -> dict:
     return raw
 
 
-def iter_files(root: Path, links: list[dict] | None = None):
+def iter_files(root: Path, links: list[dict] | None = None, skipped: list[str] | None = None):
     """Every real file in the target, including binaries. Filtering happens later.
 
     The lock has to cover files the rules cannot read, or swapping a binary
@@ -139,6 +139,10 @@ def iter_files(root: Path, links: list[dict] | None = None):
             directory = Path(dirpath) / name
             if directory.is_symlink() and links is not None:
                 links.append(link_record(root, directory))
+        if skipped is not None:
+            # Not walked means not hashed and not in the lock, so the caller has
+            # to be able to say which places this scan does not reach.
+            skipped += [relative_name(root, Path(dirpath) / d) for d in sorted(dirnames) if d in SKIP_DIRS]
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not (Path(dirpath) / d).is_symlink()]
         for name in sorted(filenames):
             path = Path(dirpath) / name
@@ -332,6 +336,8 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
     digests: dict[str, str] = {}
     unread: list[str] = []
     dropped: list[str] = []
+    notread: list[str] = []
+    skipped: list[str] = []
     longline: list[str] = []
     links: list[dict] = []
     declares_allowed_tools = False
@@ -340,7 +346,7 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
 
     allowlist = set(rules["host_allowlist"])
 
-    for path in iter_files(root, links):
+    for path in iter_files(root, links, skipped):
         rel = relative_name(root, path)
 
         # Hash first and unconditionally. A file the rules cannot read is
@@ -361,8 +367,7 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
             dropped.append(rel)
             continue
         if not is_readable_text(path) or oversized:
-            if oversized:
-                unread.append(rel)
+            (unread if oversized else notread).append(rel)
             continue
 
         text = read_text(path)
@@ -395,6 +400,10 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
         findings.append(synthetic(rules, "SCAN-TOO-LARGE", file=rel))
     for rel in dropped:
         findings.append(synthetic(rules, "SCAN-FILE-DROPPED", file=rel))
+    for rel in notread:
+        findings.append(synthetic(rules, "SCAN-NOT-READ", file=rel))
+    for rel in skipped:
+        findings.append(synthetic(rules, "SCAN-DIR-SKIPPED", file=rel))
     for rel in longline:
         findings.append(synthetic(rules, "OBFUS-LONG-LINE", file=rel))
     for link in links:
@@ -420,6 +429,8 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
         "files_hashed": len(digests),
         "files_unread": sorted(unread),
         "files_dropped": sorted(dropped),
+        "files_not_read": sorted(notread),
+        "dirs_skipped": sorted(skipped),
         "symlinks": links,
         "findings": findings,
         "mentions": mentions,

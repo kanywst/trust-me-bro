@@ -464,13 +464,19 @@ class _Hit:
     from an invented offset: a fabricated 0 reads as "outside any inline code
     span", which would demote a real command to prose and quietly drop it from
     the trifecta.
+
+    `quote` and `quote_at` carry the compressed text and the offset the match
+    landed at inside it, so the report can still show the command rather than
+    whichever 120 characters happen to come first.
     """
 
-    __slots__ = ("_start", "exact")
+    __slots__ = ("_start", "exact", "quote", "quote_at")
 
-    def __init__(self, start: int, exact: bool = True):
+    def __init__(self, start: int, exact: bool = True, quote: str = "", quote_at: int = 0):
         self._start = start
         self.exact = exact
+        self.quote = quote
+        self.quote_at = quote_at
 
     def start(self) -> int:
         return self._start
@@ -522,10 +528,13 @@ def search_bounded(pattern: re.Pattern, line: str):
     compressed = squeeze(line)
     if len(compressed) < len(line):
         for offset in range(0, max(len(compressed), 1), step):
-            if pattern.search(compressed[offset : offset + MAX_LINE]):
+            found = pattern.search(compressed[offset : offset + MAX_LINE])
+            if found:
                 # No position in the original line survives compression, so the
-                # match is marked inexact and the caller treats it as code.
-                return _Hit(0, exact=False)
+                # match is marked inexact and the caller treats it as code. The
+                # offset inside the compressed copy is kept, because that copy
+                # is what the report quotes and it has to quote the command.
+                return _Hit(0, exact=False, quote=compressed, quote_at=offset + found.start())
     return None
 
 
@@ -548,7 +557,7 @@ def match_lines(
         # one is impossible. Quote the compressed copy the match was found in
         # instead, which keeps the shape of the command, and say that is what
         # it is rather than passing filler off as the evidence.
-        text = trim(line, around=match.start()) if exact else trim(squeeze(line))
+        text = trim(line, around=match.start()) if exact else trim(match.quote, around=match.quote_at)
         hit = {"line": index + 1, "text": text, "context": "code" if is_code else "prose"}
         if not exact:
             hit["compressed"] = True

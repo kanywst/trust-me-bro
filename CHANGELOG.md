@@ -29,7 +29,7 @@ First release. A pre-install audit for agent skills, plugins, and MCP servers: o
 - The quoted evidence for a finding is the part of the line that matched, not its first 120 characters, so padding cannot push the command out of its own report. When the match was only found in a compressed copy, the compressed text is quoted and labelled as such rather than presented as the line.
 - A match found only in the compressed copy of a line is marked inexact and treated as code. Inferring prose from an offset that does not exist in the original would quietly demote a real command.
 - A target where nothing could be read reports `NOTHING READ` and exits `1`, never `0`. A scan that opened no files has cleared nothing.
-- Every place the scan does not reach is named: `SCAN-DIR-SKIPPED` for a vendored or build directory that is not walked and therefore not locked, and `SCAN-NOT-READ` for a file that is hashed but whose type no rule can parse.
+- Every place the scan does not reach is named. A vendored or build directory is `SCAN-VENDOR-SKIPPED` at `high`, so a skill hiding code in `node_modules` cannot come back clean at exit `0`; a version-control or cache directory is `SCAN-DIR-SKIPPED` at `low`; a file hashed but never parsed is `SCAN-NOT-READ`.
 - A file the scanner cannot open at all is reported as `SCAN-FILE-DROPPED` rather than skipped. It is absent from the lock, so `--check` cannot see it change; being absent from the tally as well would leave it in the skill and in no count at all.
 
 [Unreleased]: https://github.com/kanywst/trust-me-bro/compare/v0.1.0...HEAD

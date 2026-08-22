@@ -285,6 +285,13 @@
       "why": "The field is optional in the Agent Skills spec, so most skills omit it. It means the runtime, not the skill, decides what it can reach."
     },
     {
+      "id": "SCAN-FILE-DROPPED",
+      "severity": "high",
+      "pattern": null,
+      "title": "a file could not be read at all",
+      "why": "Permission denied, or it changed under the scan. No rule has looked inside it, and if it could not be hashed it is not in the lock either, so --check may not notice it changing again. This is the one place a payload can sit where nothing here has looked, so look yourself."
+    },
+    {
       "id": "SCAN-TOO-LARGE",
       "severity": "high",
       "pattern": null,

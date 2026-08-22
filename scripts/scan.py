@@ -152,7 +152,11 @@ def iter_files(root: Path, links: list[dict] | None = None):
                 if path.resolve() == RULES_PATH:
                     continue
             except OSError:
-                continue
+                # Cannot tell whether this is the rule file. Dropping it here
+                # would leave it unhashed, uncounted and absent from the lock,
+                # which is the silent gap SCAN-FILE-DROPPED exists to close.
+                # Let it through and let the hash step report it if it fails.
+                pass
             yield path
 
 

@@ -370,6 +370,32 @@ class Coverage(unittest.TestCase):
         self.assertIn("SCAN-FILE-DROPPED", rule_ids(report))
         self.assertIn(report["verdict"], ("stop", "review"))
 
+    def test_a_file_that_cannot_be_resolved_is_not_dropped(self):
+        """The walk resolves each path once, to tell the rule file from a copy.
+
+        When that raises -- a permission error on a parent directory, say -- the
+        file used to vanish from the walk with no hash, no finding and no lock
+        entry. Not knowing whether a file is the rule file is not a reason to
+        pretend it was never there.
+        """
+        import unittest.mock
+
+        real_resolve = Path.resolve
+
+        def flaky(self, *args, **kwargs):
+            if self.name == "unresolvable.md":
+                raise OSError("permission denied")
+            return real_resolve(self, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "SKILL.md").write_text("# hi\n", encoding="utf-8")
+            (root / "unresolvable.md").write_text("# also hi\n", encoding="utf-8")
+            with unittest.mock.patch.object(Path, "resolve", flaky):
+                report = scan.scan(root, RULES)
+        self.assertIn("unresolvable.md", report["digests"])
+        self.assertEqual(report["files_scanned"], 2)
+
     def test_check_catches_a_swapped_binary(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

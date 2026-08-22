@@ -134,7 +134,7 @@
       "id": "RCE-PIPE-SHELL",
       "severity": "critical",
       "negation_safe": true,
-      "pattern": "(curl|wget)\\s[^\\n|]*(https?://|\\$\\{?[A-Za-z_])[^\\n|]*\\|\\s*(sudo\\s+)?((((ba|z|k)?sh)(?!(\\s+-{1,2}[A-Za-z][\\w-]*){0,4}\\s+-{1,2}c\\b(?![^\\n]*(/dev/stdin|\\beval\\b|\\bexec\\b|\\bos\\.system\\b|\\bsubprocess\\b|\\bpopen\\b|\\$\\(|`\\s*cat\\b)))|(python[0-9.]*|node|ruby|perl)(?!(\\s+-{1,2}[A-Za-z][\\w-]*){0,4}\\s+-{1,2}(c|e|m|ne|pe|eval|command)\\b(?![^\\n]*(/dev/stdin|\\beval\\b|\\bexec\\b|\\bos\\.system\\b|\\bsubprocess\\b|\\bpopen\\b|\\$\\(|`\\s*cat\\b))))\\b)|iex\\s*\\(\\s*new-object",
+      "pattern": "(curl|wget)\\s[^\\n|]*(https?://|\\$\\{?[A-Za-z_])[^\\n|]*\\|\\s*(sudo\\s+)?((((ba|z|k)?sh)(?!(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,4}\\s+-{1,2}c\\b(?![^\\n]*(/dev/stdin|\\beval\\b|\\bexec\\b|\\bos\\.system\\b|\\bsubprocess\\b|\\bpopen\\b|\\$\\(|`\\s*cat\\b)))|(python[0-9.]*|node|ruby|perl)(?!(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,4}\\s+-{1,2}(c|e|m|ne|pe|eval|command)\\b(?![^\\n]*(/dev/stdin|\\beval\\b|\\bexec\\b|\\bos\\.system\\b|\\bsubprocess\\b|\\bpopen\\b|\\$\\(|`\\s*cat\\b))))\\b)|iex\\s*\\(\\s*new-object",
       "title": "downloads a remote script and executes it",
       "why": "The code that actually runs is whatever that URL serves at the moment you run it. Nothing you review here binds it.",
       "prose_is_code": true
@@ -143,7 +143,7 @@
       "id": "RCE-PIPE-INTERPRETER",
       "severity": "high",
       "negation_safe": true,
-      "pattern": "(curl|wget)\\s[^\\n|]*(https?://|\\$\\{?[A-Za-z_])[^\\n|]*\\|\\s*(sudo\\s+)?((ba|z|k)?sh|python[0-9.]*|node|ruby|perl)(\\s+-{1,2}[A-Za-z][\\w-]*){0,4}\\s+-{1,2}(c|e|m|ne|pe|eval|command)\\b(?![^\\n]*(/dev/stdin|\\beval\\b|\\bexec\\b|\\bos\\.system\\b|\\bsubprocess\\b|\\bpopen\\b|\\$\\(|`\\s*cat\\b))",
+      "pattern": "(curl|wget)\\s[^\\n|]*(https?://|\\$\\{?[A-Za-z_])[^\\n|]*\\|\\s*(sudo\\s+)?((ba|z|k)?sh|python[0-9.]*|node|ruby|perl)(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,4}\\s+-{1,2}(c|e|m|ne|pe|eval|command)\\b(?![^\\n]*(/dev/stdin|\\beval\\b|\\bexec\\b|\\bos\\.system\\b|\\bsubprocess\\b|\\bpopen\\b|\\$\\(|`\\s*cat\\b))",
       "title": "pipes a remote download into an interpreter",
       "why": "The inline program decides what happens to the download. Whether that is parsing it or running it cannot be read off the command line, so read the program. This is the same line RCE-PIPE-SHELL would call critical if it could prove the download gets executed.",
       "prose_is_code": true

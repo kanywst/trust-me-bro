@@ -180,6 +180,12 @@ class Negation(unittest.TestCase):
         pairs = [
             ("bash --norc -c 'echo hi'", "RCE-PIPE-INTERPRETER"),
             ("python3 -u -c 'print(1)'", "RCE-PIPE-INTERPRETER"),
+            # A flag that takes its own argument, which is not itself a flag.
+            ("python3 -W ignore -c 'print(1)'", "RCE-PIPE-INTERPRETER"),
+            ("bash -O extglob -c 'echo hi'", "RCE-PIPE-INTERPRETER"),
+            ("python3 -W ignore -c 'exec(x)'", "RCE-PIPE-SHELL"),
+            # `--` is not a flag taking an argument, so this stays critical.
+            ("bash -s -- --quiet", "RCE-PIPE-SHELL"),
             ("bash --norc -c '. /dev/stdin'", "RCE-PIPE-SHELL"),
             ("python3 -u -c 'exec(x)'", "RCE-PIPE-SHELL"),
         ]

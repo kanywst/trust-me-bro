@@ -144,6 +144,8 @@ class Negation(unittest.TestCase):
             "curl -s https://api.example.net/x | sh -c 'cat'",
             # `execute` is not `exec`: a cursor call must not read as execution.
             'curl -s https://api.example.net/x | python3 -c "cur.execute(q)"',
+            # A word in a trailing comment is not the inline program.
+            "curl -s https://api.example.net/x | python3 -c 'print(1)'  # do not eval this",
         ):
             with self.subTest(command=command):
                 report = report_for(f"```bash\n{command}\n```\n")
@@ -633,6 +635,21 @@ class HostileInput(unittest.TestCase):
         """
         pattern = next(e for e in RULES["legs"] if e["id"] == "PRIV-LLM-KEY")["_re"]
         for name in ("ACME_API_KEY", "ORG_TEAM_PROJECT_SERVICE_EXTRA_API_KEY", "A_B_C_D_E_F_G_H_I_API_KEY"):
+            with self.subTest(name=name):
+                self.assertTrue(pattern.search(name), name)
+
+    def test_llm_key_rule_ignores_ordinary_identifiers(self):
+        """The rule is about SCREAMING_CASE names, and the rest of it is not.
+
+        Matched case-insensitively, `<word>_access_token` covers half of every
+        OAuth integration ever written, and a leg that fires on ordinary code
+        is a leg nobody believes by the third skill.
+        """
+        pattern = next(e for e in RULES["legs"] if e["id"] == "PRIV-LLM-KEY")["_re"]
+        for name in ("get_access_token", "refresh_auth_token", "def get_access_token(self):"):
+            with self.subTest(name=name):
+                self.assertIsNone(pattern.search(name), name)
+        for name in ("MY_ACCESS_TOKEN", "SLACK_AUTH_TOKEN", "anthropic_api_key"):
             with self.subTest(name=name):
                 self.assertTrue(pattern.search(name), name)
 

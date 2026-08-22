@@ -60,8 +60,42 @@ TEXT_SUFFIXES = {
     ".conf",
     ".xml",
     ".html",
+    # Anything a skill could plausibly ship as code. A language the rules cannot
+    # open is a language a payload can hide in, so the list errs towards reading.
+    ".php",
+    ".lua",
+    ".pl",
+    ".pm",
+    ".r",
+    ".swift",
+    ".kt",
+    ".kts",
+    ".java",
+    ".cs",
+    ".groovy",
+    ".ex",
+    ".exs",
+    ".clj",
+    ".scala",
+    ".dart",
+    ".vim",
+    ".el",
+    ".sql",
+    ".awk",
+    ".tcl",
+    ".ipynb",
+    ".applescript",
+    ".nu",
+    ".ps",
 }
-SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".mypy_cache"}
+# Vendored or built code that ships with the skill. Not walked, for speed, and
+# reported loudly because of it: nothing in here is read, hashed or locked, and
+# a skill has no reason to carry a dependency tree in the first place.
+VENDOR_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "vendor", "target", "site-packages"}
+# Version control and caches. Skipped for the same reason and reported quietly,
+# because every checkout has them and they are not the skill's own code.
+META_DIRS = {".git", "__pycache__", ".mypy_cache", ".ruff_cache", ".pytest_cache", ".tox"}
+SKIP_DIRS = VENDOR_DIRS | META_DIRS
 MAX_BYTES = 2_000_000
 # No reviewable line is this long. A single regex call is bounded to this many
 # characters so a hostile skill cannot hand the engine a 50 KB line and stall
@@ -376,7 +410,8 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
         try:
             oversized = path.stat().st_size > MAX_BYTES
         except OSError:
-            dropped.append(rel)
+            # Hashed already, so the lock covers it. Only the reading failed.
+            notread.append(rel)
             continue
         if not is_readable_text(path) or oversized:
             (unread if oversized else notread).append(rel)
@@ -384,7 +419,7 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
 
         text = read_text(path)
         if text is None:
-            dropped.append(rel)
+            notread.append(rel)
             continue
         scanned += 1
         is_skill = is_skill or path.name.lower() == SKILL_NAME
@@ -415,7 +450,8 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
     for rel in notread:
         findings.append(synthetic(rules, "SCAN-NOT-READ", file=rel))
     for rel in skipped:
-        findings.append(synthetic(rules, "SCAN-DIR-SKIPPED", file=rel))
+        vendored = Path(rel).name in VENDOR_DIRS
+        findings.append(synthetic(rules, "SCAN-VENDOR-SKIPPED" if vendored else "SCAN-DIR-SKIPPED", file=rel))
     for rel in longline:
         findings.append(synthetic(rules, "OBFUS-LONG-LINE", file=rel))
     for link in links:
@@ -685,7 +721,7 @@ def render(report: dict, color: bool) -> str:
     if unread:
         tally += f", {unread} too large to read"
     if dropped:
-        tally += f", {dropped} could not be read at all"
+        tally += f", {dropped} could not be hashed"
     out = [
         "",
         f"  trust-me-bro  {report['target']}",

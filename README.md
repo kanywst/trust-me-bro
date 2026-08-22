@@ -118,7 +118,11 @@ python3 scripts/scan.py ./some-skill --check  # did it change under you?
 
 The lock covers every file the walk reaches, hashed from the bytes on disk, including binaries and anything too large to scan. Those are exactly where a payload would go, so a lock that skipped them would be theatre.
 
-Vendored and build directories — `node_modules`, `.git`, `dist`, `venv` and the rest — are not walked, so nothing in them is hashed or locked. That is a speed choice, and it would be an indefensible silence, so each one is named in the report as `SCAN-DIR-SKIPPED`. A file whose type no rule can parse is named too, as `SCAN-NOT-READ`: it is hashed, so `--check` still sees it change, but nothing has looked inside it.
+Some directories are not walked at all, so nothing in them is read, hashed or locked. Skipping them is a speed choice; being quiet about it would not be one, so each is named.
+
+A vendored or build directory — `node_modules`, `venv`, `dist`, `vendor` — is `SCAN-VENDOR-SKIPPED` at **high**, which puts the verdict at **REVIEW** and exit `1`. A skill has no reason to ship a dependency tree, and the one place nothing looked is the obvious place to put the thing you do not want read. Version-control and cache directories are `SCAN-DIR-SKIPPED` at low: every checkout has a `.git`, and a rule that fires on all of them is a rule nobody reads.
+
+A file that was hashed but never parsed is `SCAN-NOT-READ`. `--check` still sees it change, but nothing has looked inside it.
 
 ```text
   trust-me-bro  ./some-skill

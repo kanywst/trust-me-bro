@@ -29,7 +29,7 @@
     {
       "id": "PRIV-LLM-KEY",
       "leg": "private",
-      "pattern": "\\b(ANTHROPIC|OPENAI|GEMINI|GROQ|OPENROUTER|HUGGINGFACE|COHERE|MISTRAL)_API_KEY\\b|\\b[A-Z0-9]{1,20}(_[A-Z0-9]{1,20}){0,8}_(API_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN)\\b",
+      "pattern": "\\b(ANTHROPIC|OPENAI|GEMINI|GROQ|OPENROUTER|HUGGINGFACE|COHERE|MISTRAL)_API_KEY\\b|(?-i:\\b[A-Z0-9]{1,20}(_[A-Z0-9]{1,20}){0,8}_(API_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN)\\b)",
       "title": "reads API keys"
     },
     {
@@ -134,7 +134,7 @@
       "id": "RCE-PIPE-SHELL",
       "severity": "critical",
       "negation_safe": true,
-      "pattern": "(curl|wget)\\s[^\\n|]*(https?://|\\$\\{?[A-Za-z_])[^\\n|]*\\|\\s*(sudo\\s+)?((((ba|z|k)?sh)(?!(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,4}\\s+(-{1,2}c|-[A-Za-z]{1,8}c)\\b(?![^\\n]*(/dev/stdin|\\beval\\b|\\bexec(Sync|File|FileSync)?\\b|\\bos\\.system\\b|\\bsystem\\s*\\(|\\bspawn(Sync)?\\b|child_process|\\bsubprocess\\b|\\bpopen\\b|%x[\\(\\[{]|\\$\\(|`\\s*cat\\b)))|(python[0-9.]*|node|ruby|perl)(?!(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,4}\\s+(-{1,2}(c|e|m|ne|pe|eval|command)|-[A-Za-z]{1,8}[cem])\\b(?![^\\n]*(/dev/stdin|\\beval\\b|\\bexec(Sync|File|FileSync)?\\b|\\bos\\.system\\b|\\bsystem\\s*\\(|\\bspawn(Sync)?\\b|child_process|\\bsubprocess\\b|\\bpopen\\b|%x[\\(\\[{]|\\$\\(|`\\s*cat\\b))))\\b)|iex\\s*\\(\\s*new-object",
+      "pattern": "(curl|wget)\\s[^\\n|]*(https?://|\\$\\{?[A-Za-z_])[^\\n|]*\\|\\s*(sudo\\s+)?((((ba|z|k)?sh)(?!(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,4}\\s+(-{1,2}c|-[A-Za-z]{1,8}c)\\b(?![^\\n#]*(/dev/stdin|\\beval\\b|\\bexec(Sync|File|FileSync)?\\b|\\bos\\.system\\b|\\bsystem\\s*\\(|\\bspawn(Sync)?\\b|child_process|\\bsubprocess\\b|\\bpopen\\b|%x[\\(\\[{]|\\$\\(|`\\s*cat\\b)))|(python[0-9.]*|node|ruby|perl)(?!(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,4}\\s+(-{1,2}(c|e|m|ne|pe|eval|command)|-[A-Za-z]{1,8}[cem])\\b(?![^\\n#]*(/dev/stdin|\\beval\\b|\\bexec(Sync|File|FileSync)?\\b|\\bos\\.system\\b|\\bsystem\\s*\\(|\\bspawn(Sync)?\\b|child_process|\\bsubprocess\\b|\\bpopen\\b|%x[\\(\\[{]|\\$\\(|`\\s*cat\\b))))\\b)|iex\\s*\\(\\s*new-object",
       "title": "downloads a remote script and executes it",
       "why": "The code that actually runs is whatever that URL serves at the moment you run it. Nothing you review here binds it.",
       "prose_is_code": true
@@ -143,7 +143,7 @@
       "id": "RCE-PIPE-INTERPRETER",
       "severity": "high",
       "negation_safe": true,
-      "pattern": "(curl|wget)\\s[^\\n|]*(https?://|\\$\\{?[A-Za-z_])[^\\n|]*\\|\\s*(sudo\\s+)?((ba|z|k)?sh|python[0-9.]*|node|ruby|perl)(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,4}\\s+(-{1,2}(c|e|m|ne|pe|eval|command)|-[A-Za-z]{1,8}[cem])\\b(?![^\\n]*(/dev/stdin|\\beval\\b|\\bexec(Sync|File|FileSync)?\\b|\\bos\\.system\\b|\\bsystem\\s*\\(|\\bspawn(Sync)?\\b|child_process|\\bsubprocess\\b|\\bpopen\\b|%x[\\(\\[{]|\\$\\(|`\\s*cat\\b))",
+      "pattern": "(curl|wget)\\s[^\\n|]*(https?://|\\$\\{?[A-Za-z_])[^\\n|]*\\|\\s*(sudo\\s+)?((ba|z|k)?sh|python[0-9.]*|node|ruby|perl)(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,4}\\s+(-{1,2}(c|e|m|ne|pe|eval|command)|-[A-Za-z]{1,8}[cem])\\b(?![^\\n#]*(/dev/stdin|\\beval\\b|\\bexec(Sync|File|FileSync)?\\b|\\bos\\.system\\b|\\bsystem\\s*\\(|\\bspawn(Sync)?\\b|child_process|\\bsubprocess\\b|\\bpopen\\b|%x[\\(\\[{]|\\$\\(|`\\s*cat\\b))",
       "title": "pipes a remote download into an interpreter",
       "why": "The inline program decides what happens to the download. Whether that is parsing it or running it cannot be read off the command line, so read the program. This is the same line RCE-PIPE-SHELL would call critical if it could prove the download gets executed.",
       "prose_is_code": true

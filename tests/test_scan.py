@@ -495,6 +495,25 @@ class NothingRead(unittest.TestCase):
 
         self.assertEqual(self.verdict_for(build), "stop")
 
+    def test_the_trifecta_box_never_claims_it_looked(self):
+        """A finding that needs no reading outranks nothing-read in decide().
+
+        The verdict is then review or stop, and keying the leg text off the
+        verdict put "not seen" back on a scan that opened nothing -- the
+        reassurance the whole nothing-read path exists to withhold.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "node_modules").mkdir()
+            (root / "node_modules" / "x.js").write_text("var x = 1\n", encoding="utf-8")
+            report = scan.scan(root, RULES)
+        report["verdict"] = scan.decide(report)
+        self.assertEqual(report["files_scanned"], 0)
+        self.assertEqual(report["verdict"], "review")
+        rendered = scan.render(report, color=False)
+        self.assertIn("nothing read", rendered)
+        self.assertNotIn("not seen", rendered)
+
     def test_the_trifecta_box_does_not_claim_it_looked(self):
         with tempfile.TemporaryDirectory() as tmp:
             report = scan.scan(Path(tmp), RULES)

@@ -17,7 +17,7 @@ First release. A pre-install audit for agent skills, plugins, and MCP servers: o
 - A rule set of standalone findings that do not need the trifecta: remote code execution, encoded exfiltration, injection wording aimed at the agent, permission-system bypass, and persistence into shell profiles, schedulers, and agent config.
 - Prose-versus-code classification. A skill that *describes* `~/.ssh` does not tick the leg that a skill *reading* it does. Injection wording is the exception, because a skill is instructions.
 - Provenance reporting: signed, hashed, or neither. A certificate or a public key with nothing signed is reported as key material next to a verdict of `none`, never as provenance.
-- `--pin` and `--check`. Every file is hashed from the bytes on disk, including binaries and anything too large to read, so a swapped payload shows up as drift.
+- `--pin` and `--check`. Every file the walk reaches is hashed from the bytes on disk, including binaries and anything too large to read, so a swapped payload shows up as drift. Directories the walk skips are not hashed, and are named in the report for exactly that reason.
 - `.trustmebro.ignore` suppressions, which require a reason and are read only from the target's own directory.
 - `--json` output for CI, and `--version`.
 - Ships as a Claude Code plugin, installable from a marketplace.

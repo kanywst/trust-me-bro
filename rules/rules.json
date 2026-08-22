@@ -134,7 +134,7 @@
       "id": "RCE-PIPE-SHELL",
       "severity": "critical",
       "negation_safe": true,
-      "pattern": "(curl|wget)\\s[^\\n|]*(https?://|\\$\\{?[A-Za-z_])[^\\n|]*\\|\\s*(sudo\\s+)?((((ba|z|k)?sh)(?!(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,4}\\s+(-{1,2}c|-[A-Za-z]{1,8}c)\\b(?![^\\n#]*(/dev/stdin|\\beval\\b|\\bexec(Sync|File|FileSync)?\\b|\\bos\\.system\\b|\\bsystem\\s*\\(|\\bspawn(Sync)?\\b|child_process|\\bsubprocess\\b|\\bpopen\\b|%x[\\(\\[{]|\\$\\(|`\\s*cat\\b)))|(python[0-9.]*|node|ruby|perl)(?!(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,4}\\s+(-{1,2}(c|e|m|ne|pe|eval|command)|-[A-Za-z]{1,8}[cem])\\b(?![^\\n#]*(/dev/stdin|\\beval\\b|\\bexec(Sync|File|FileSync)?\\b|\\bos\\.system\\b|\\bsystem\\s*\\(|\\bspawn(Sync)?\\b|child_process|\\bsubprocess\\b|\\bpopen\\b|%x[\\(\\[{]|\\$\\(|`\\s*cat\\b))))\\b)|iex\\s*\\(\\s*new-object",
+      "pattern": "(curl|wget)\\s[^\\n|]*(https?://|\\$\\{?[A-Za-z_])[^\\n|]*\\|\\s*(sudo\\s+)?((((ba|z|k)?sh)(?!(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,12}\\s+(-{1,2}c|-[A-Za-z]{1,8}c)\\b(?![^\\n#]*(/dev/stdin|\\beval\\b|\\bexec(Sync|File|FileSync)?\\b|\\bos\\.system\\b|\\bsystem\\s*\\(|\\bspawn(Sync)?\\b|child_process|\\bsubprocess\\b|\\bpopen\\b|%x[\\(\\[{]|\\$\\(|`\\s*cat\\b)))|(python[0-9.]*|node|ruby|perl)(?!(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,12}\\s+(-{1,2}(c|e|m|ne|pe|eval|command)|-[A-Za-z]{1,8}[cem])\\b(?![^\\n#]*(/dev/stdin|\\beval\\b|\\bexec(Sync|File|FileSync)?\\b|\\bos\\.system\\b|\\bsystem\\s*\\(|\\bspawn(Sync)?\\b|child_process|\\bsubprocess\\b|\\bpopen\\b|%x[\\(\\[{]|\\$\\(|`\\s*cat\\b))))\\b)|iex\\s*\\(\\s*new-object",
       "title": "downloads a remote script and executes it",
       "why": "The code that actually runs is whatever that URL serves at the moment you run it. Nothing you review here binds it.",
       "prose_is_code": true
@@ -143,7 +143,7 @@
       "id": "RCE-PIPE-INTERPRETER",
       "severity": "high",
       "negation_safe": true,
-      "pattern": "(curl|wget)\\s[^\\n|]*(https?://|\\$\\{?[A-Za-z_])[^\\n|]*\\|\\s*(sudo\\s+)?((ba|z|k)?sh|python[0-9.]*|node|ruby|perl)(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,4}\\s+(-{1,2}(c|e|m|ne|pe|eval|command)|-[A-Za-z]{1,8}[cem])\\b(?![^\\n#]*(/dev/stdin|\\beval\\b|\\bexec(Sync|File|FileSync)?\\b|\\bos\\.system\\b|\\bsystem\\s*\\(|\\bspawn(Sync)?\\b|child_process|\\bsubprocess\\b|\\bpopen\\b|%x[\\(\\[{]|\\$\\(|`\\s*cat\\b))",
+      "pattern": "(curl|wget)\\s[^\\n|]*(https?://|\\$\\{?[A-Za-z_])[^\\n|]*\\|\\s*(sudo\\s+)?((ba|z|k)?sh|python[0-9.]*|node|ruby|perl)(\\s+-{1,2}[A-Za-z][\\w-]*(\\s+[^\\s-][^\\s]*)?){0,12}\\s+(-{1,2}(c|e|m|ne|pe|eval|command)|-[A-Za-z]{1,8}[cem])\\b(?![^\\n#]*(/dev/stdin|\\beval\\b|\\bexec(Sync|File|FileSync)?\\b|\\bos\\.system\\b|\\bsystem\\s*\\(|\\bspawn(Sync)?\\b|child_process|\\bsubprocess\\b|\\bpopen\\b|%x[\\(\\[{]|\\$\\(|`\\s*cat\\b))",
       "title": "pipes a remote download into an interpreter",
       "why": "The inline program decides what happens to the download. Whether that is parsing it or running it cannot be read off the command line, so read the program. This is the same line RCE-PIPE-SHELL would call critical if it could prove the download gets executed.",
       "prose_is_code": true
@@ -283,6 +283,20 @@
       "pattern": null,
       "title": "declares no allowed-tools",
       "why": "The field is optional in the Agent Skills spec, so most skills omit it. It means the runtime, not the skill, decides what it can reach."
+    },
+    {
+      "id": "SCAN-DIR-SKIPPED",
+      "severity": "low",
+      "pattern": null,
+      "title": "a directory was skipped whole",
+      "why": "Vendored and build directories are not walked, so nothing in this one was read or hashed. It is not in the lock either, which means --check cannot see it change. A skill that ships one is a skill with a place this scan does not reach."
+    },
+    {
+      "id": "SCAN-NOT-READ",
+      "severity": "low",
+      "pattern": null,
+      "title": "a file was hashed but no rule read it",
+      "why": "Its type is not one the rules parse, so only the hash covers it. --check will still catch it changing, but nothing here has looked inside."
     },
     {
       "id": "SCAN-FILE-DROPPED",

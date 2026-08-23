@@ -702,6 +702,47 @@ class HostileInput(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertTrue(pattern.search(name), name)
 
+    def test_a_notebook_with_a_chart_is_not_a_stop(self):
+        """Notebook image output is one very long base64 line, by format.
+
+        Reading notebooks would make OBFUS-LONG-LINE call every notebook with a
+        chart critical. A tool that says STOP about every notebook is a tool
+        people stop running.
+        """
+        import base64
+
+        notebook = {
+            "cells": [
+                {"cell_type": "code", "outputs": [{"data": {"image/png": base64.b64encode(b"a" * 3000).decode()}}]}
+            ],
+            "nbformat": 4,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "SKILL.md").write_text("# hi\n", encoding="utf-8")
+            (root / "notes.ipynb").write_text(json.dumps(notebook, indent=1), encoding="utf-8")
+            report = scan.scan(root, RULES)
+        report["verdict"] = scan.decide(report)
+        self.assertEqual(report["verdict"], "ok", rule_ids(report))
+        # Still hashed, still named as unexamined.
+        self.assertIn("notes.ipynb", report["digests"])
+        self.assertIn("notes.ipynb", report["files_not_read"])
+
+    def test_llm_key_rule_reads_a_lowercase_secret_out_of_the_environment(self):
+        """A lowercase name is a name; reading one out of the environment is access.
+
+        Making the generic suffix case-sensitive stopped `def get_access_token`
+        being called a secret read, and took `os.getenv("stripe_secret")` with
+        it. The access shape brings that back without the identifier.
+        """
+        pattern = next(e for e in RULES["legs"] if e["id"] == "PRIV-LLM-KEY")["_re"]
+        for text in ('os.getenv("stripe_secret")', "os.environ['stripe_api_key']", 'process.env["gh_access_token"]'):
+            with self.subTest(text=text):
+                self.assertTrue(pattern.search(text), text)
+        for text in ("os.getenv('HOME')", "environ.get('PATH')"):
+            with self.subTest(text=text):
+                self.assertIsNone(pattern.search(text), text)
+
     def test_llm_key_rule_ignores_ordinary_identifiers(self):
         """The rule is about SCREAMING_CASE names, and the rest of it is not.
 

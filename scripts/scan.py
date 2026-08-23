@@ -83,11 +83,13 @@ TEXT_SUFFIXES = {
     ".sql",
     ".awk",
     ".tcl",
-    ".ipynb",
     ".applescript",
     ".nu",
-    ".ps",
 }
+# Deliberately not read: a notebook keeps image output as one very long base64
+# line, so reading them would make OBFUS-LONG-LINE call every notebook with a
+# chart critical. They are hashed and reported as SCAN-NOT-READ instead, which
+# is the honest version of "nothing here looked inside that".
 # Vendored or built code that ships with the skill. Not walked, for speed, and
 # reported loudly because of it: nothing in here is read, hashed or locked, and
 # a skill has no reason to carry a dependency tree in the first place.

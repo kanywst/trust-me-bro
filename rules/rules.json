@@ -29,7 +29,7 @@
     {
       "id": "PRIV-LLM-KEY",
       "leg": "private",
-      "pattern": "\\b(ANTHROPIC|OPENAI|GEMINI|GROQ|OPENROUTER|HUGGINGFACE|COHERE|MISTRAL)_API_KEY\\b|(?-i:\\b[A-Z0-9]{1,20}(_[A-Z0-9]{1,20}){0,8}_(API_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN)\\b)",
+      "pattern": "\\b(ANTHROPIC|OPENAI|GEMINI|GROQ|OPENROUTER|HUGGINGFACE|COHERE|MISTRAL)_API_KEY\\b|(?-i:\\b[A-Z0-9]{1,20}(_[A-Z0-9]{1,20}){0,8}_(API_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN)\\b)|\\b(getenv|environ|env)\\s*[\\[(]\\s*[\"']?[A-Za-z0-9_]{0,40}(SECRET|API_KEY|ACCESS_TOKEN|AUTH_TOKEN|PRIVATE_KEY)\\b",
       "title": "reads API keys"
     },
     {

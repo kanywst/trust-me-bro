@@ -127,6 +127,18 @@
       "leg": "exfil",
       "pattern": "aws s3 cp|s3\\.upload|gsutil cp|az storage blob upload|\\bscp\\s|\\brsync\\s[^\\n]*::?",
       "title": "uploads to remote storage"
+    },
+    {
+      "id": "UNTR-MCP-SERVER",
+      "leg": "untrusted",
+      "pattern": null,
+      "title": "takes in tool results from a remote MCP server"
+    },
+    {
+      "id": "EXFIL-MCP-SERVER",
+      "leg": "exfil",
+      "pattern": null,
+      "title": "sends tool arguments to a remote MCP server"
     }
   ],
   "rules": [
@@ -304,6 +316,34 @@
       "pattern": null,
       "title": "a file was hashed but no rule read it",
       "why": "Only the hash covers it: either no rule parses its type, or it could not be opened. --check will still catch it changing, but nothing here has looked inside."
+    },
+    {
+      "id": "SCAN-CONFIG-UNPARSED",
+      "severity": "low",
+      "pattern": null,
+      "title": "a config named a hook or MCP block and then would not parse",
+      "why": "Every line of it was still read as text, so nothing here is unexamined. But the structure was not, and the agent's own parser is likely more forgiving than this one, so a block this tool could not open is a block that may still run."
+    },
+    {
+      "id": "HOOK-DECLARED",
+      "severity": "high",
+      "pattern": null,
+      "title": "declares a hook: a command that runs on the agent's own events",
+      "why": "Nobody invokes a hook. Installing this installs a command that runs when the agent reaches the matching event, before you see the result and whether or not you ever use the skill. Read the command."
+    },
+    {
+      "id": "MCP-SERVER-REMOTE",
+      "severity": "medium",
+      "pattern": null,
+      "title": "declares a remote MCP server",
+      "why": "Your tool arguments go to whoever runs that server, and whatever they send back enters the agent's context as trusted tool output. That is both the untrusted-content leg and the outbound leg, by construction rather than by pattern."
+    },
+    {
+      "id": "MCP-SERVER-LOCAL",
+      "severity": "medium",
+      "pattern": null,
+      "title": "declares a local MCP server",
+      "why": "The command runs on your machine with whatever environment the declaration hands it. Its own reach is scanned from the reassembled command line, but what the program does once started is outside anything this tool can read."
     },
     {
       "id": "SCAN-FILE-DROPPED",

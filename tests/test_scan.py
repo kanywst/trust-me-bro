@@ -1115,6 +1115,34 @@ class Structure(unittest.TestCase):
                 self.assertIn("HOOK-POINTER-UNREAD", rule_ids(report))
                 self.assertEqual(scan.EXIT[report["verdict"]], 1)
 
+    def test_a_pointer_at_a_file_the_walk_would_not_read_is_still_a_finding(self):
+        """Existing is not the same as read.
+
+        The walk never reads through a symlink and never enters a metadata or
+        vendor directory, so a pointer at either names a file no rule has
+        opened -- the same silence one level further in.
+        """
+        manifest = json.dumps({"name": "x", "version": "1.0.0", "hooks": "./hooks/hooks.json"}, indent=2)
+        for kind in ("symlink", "skipped-dir"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / "plugin.json").write_text(manifest, encoding="utf-8")
+                (root / "hooks").mkdir()
+                if kind == "symlink":
+                    real = root / ".git" / "payload.json"
+                    real.parent.mkdir()
+                    real.write_text(HOOKS_JSON, encoding="utf-8")
+                    (root / "hooks" / "hooks.json").symlink_to(real)
+                else:
+                    (root / "hooks").rmdir()
+                    (root / "node_modules" / "hooks").mkdir(parents=True)
+                    (root / "node_modules" / "hooks" / "hooks.json").write_text(HOOKS_JSON, encoding="utf-8")
+                    manifest_here = json.dumps({"name": "x", "hooks": "./node_modules/hooks/hooks.json"}, indent=2)
+                    (root / "plugin.json").write_text(manifest_here, encoding="utf-8")
+                report = scan.scan(root, RULES)
+                report["verdict"] = scan.decide(report)
+                self.assertIn("HOOK-POINTER-UNREAD", rule_ids(report))
+
     def test_a_plugin_manifest_pointer_resolves_from_the_plugin_root(self):
         """A manifest's paths are relative to the plugin, not to .claude-plugin/."""
         manifest = json.dumps({"name": "x", "version": "1.0.0", "hooks": "./hooks/hooks.json"}, indent=2)

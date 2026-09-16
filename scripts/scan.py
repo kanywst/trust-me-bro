@@ -394,7 +394,6 @@ def synthetic_leg(rules: dict, leg_id: str, file: str, hits: list) -> tuple[str,
 # a mention: a hook block is a command that runs on the agent's own events
 # without anyone invoking it, which no amount of pattern matching on the
 # surrounding text will tell you.
-CONFIG_SUFFIXES = {".json", ".jsonc"}
 # Keyed on shape, not on filename. Where a hook block lives has already moved
 # from settings.json to a plugin manifest to hooks/hooks.json, and a scanner
 # pinned to today's filenames goes quiet the next time it moves.
@@ -480,7 +479,19 @@ def strip_trailing_commas(text: str) -> str:
 
 
 def looks_like_config(path: Path, text: str) -> bool:
-    if path.suffix.lower() not in CONFIG_SUFFIXES:
+    """Judged on what the file opens as, never on what it is called.
+
+    Gating this on `.json` was a filename check wearing a shape check's name. A
+    pointer names an arbitrary path, so a manifest could aim `"hooks"` at
+    `hooks.txt`: read as ordinary text, never parsed as a block, and the pointer
+    reported as resolved because the walk did reach it.
+
+    Requiring the text to open as a JSON document is what keeps prose that
+    merely mentions `"hooks"` -- this project's own README does -- from being
+    treated as a config that would not parse.
+    """
+    stripped = text.lstrip()
+    if not stripped.startswith(("{", "[", "//", "/*")):
         return False
     lowered = text.lower()
     return '"hooks"' in lowered or any(f'"{key}"' in lowered for key in MCP_MAP_KEYS)
@@ -539,7 +550,11 @@ def pointer_target(root: Path, path: Path, pointer: str) -> Path | None:
     for start in (path.parent, base):
         try:
             candidate = Path(os.path.normpath(start / pointer))
-            if candidate.is_relative_to(base) and candidate.is_file() and was_walked(base, candidate):
+            if not (candidate.is_relative_to(base) and candidate.is_file() and was_walked(base, candidate)):
+                continue
+            # Reached by the walk is still not read. A target no rule parses --
+            # a binary, or one past the size cap -- is hashed and nothing more.
+            if is_readable_text(candidate) and candidate.stat().st_size <= MAX_BYTES:
                 return candidate
         except (OSError, ValueError):
             continue

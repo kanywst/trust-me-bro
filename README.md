@@ -98,6 +98,9 @@ python3 scripts/scan.py ./some-skill
 | `PERM-DANGEROUS-FLAG` | disables the agent's permission system |
 | `PERSIST-AGENT-CONFIG-WRITE` | writes to your agent's config or installs a hook |
 | `PERSIST-SHELL-PROFILE` | installs itself into your shell or a scheduler |
+| `HOOK-DECLARED` | declares a hook: a command that runs on the agent's own events |
+| `MCP-SERVER-REMOTE` | declares a remote MCP server |
+| `MCP-SERVER-LOCAL` | declares a local MCP server |
 
 The two `RCE-PIPE-*` rules split one line between them, and the split is the honest part. `curl … | bash` executes the download, and that is critical. `curl … | python3 -c '…'` hands the download to a local program, and whether that program parses it or runs it cannot be read off the command line — `bash -c 'read l; $l'` names nothing a pattern can look for. So the second rule reports every one of them at `high` instead of guessing, and the verdict floor stays at **REVIEW**, exit `1`. Only the forms that can be shown to execute the download — `. /dev/stdin`, `eval`, `exec`, `$(cat)` — are promoted back to critical. Enumerating attack idioms is a race a scanner loses; not depending on winning it is the design.
 
@@ -142,9 +145,27 @@ A skill that *describes* `~/.ssh` is not a skill that *reads* it, so threat-mode
 
 Injection wording is the exception. A skill is instructions, so a sentence telling the agent to ignore its rules counts fully, prose or not.
 
+## A config is not prose either
+
+Three things now ship in the same folder, and only one of them is a document. A `SKILL.md` is read. A hook block and an MCP server declaration are *executed configuration*, and reading them as text loses what they say.
+
+**A hook is a command nobody invokes.** `hooks/hooks.json` — or the same block inside a plugin manifest or a `settings.json` — binds a command to one of the agent's own events. Install the plugin and the command runs when the agent reaches that event, before you see the result, whether or not you ever use the skill. So the declaration itself is the finding, `HOOK-DECLARED` at **high**, and the command it binds is then scanned like any other command. A plugin that points at a hook file instead of declaring one (`"hooks": "./hooks/hooks.json"`) declares nothing here; the file it names is walked on its own.
+
+**A remote MCP server is both of the other two legs.** Your tool arguments go to whoever runs it, and whatever comes back enters the agent's context as trusted tool output. That is the outbound channel and the untrusted content, by construction rather than by pattern, so `MCP-SERVER-REMOTE` raises both legs. A skill that also reads a credential is then the trifecta, and says **STOP**.
+
+**JSON splits a command across keys.** The program is under one key, its arguments under another, its environment under a third. Every pattern in the rule file matches within a single line, so before this the command as written was a command no rule could see:
+
+```json
+{ "command": "npx", "args": ["-y", "@someone/notes-mcp@latest"] }
+```
+
+Pretty-printed, that is three lines and no rule fires. Reassembled it is `npx -y @someone/notes-mcp@latest`, which is a runtime install from a moving reference, and the existing rules say so. The reassembled line is quoted as `(reassembled from JSON)`, never passed off as a line that exists in the file.
+
+The shapes are recognised by shape, not by filename. Where a hook block lives has already moved from `settings.json` to a plugin manifest to `hooks/hooks.json`, and a scanner pinned to today's filenames goes quiet the next time it moves. Comments and trailing commas parse, because the agent's own parser accepts them; a config that names one of these shapes and then will not parse at all is `SCAN-CONFIG-UNPARSED`, since the block this tool could not open is a block that may still run.
+
 ## What this is not
 
-It reads text. That is the whole design, and the whole limitation.
+It reads text, and reads two kinds of configuration as the structures they are. That is the whole design, and the whole limitation.
 
 The text is treated as hostile, because a skill picks its own bytes. Symlinks are never followed, so `notes.md -> ~/.aws/credentials` cannot make this tool print your own secrets into its report. The path you type is handled separately, because you chose it and the skill did not. A **file** named through a link is refused rather than resolved — resolving it would quote the target's lines into the report, and nothing legitimate needs it. A **directory** named through a link is followed and reported with its target, because pointing a skills directory at a dotfiles checkout is how most people install skills, and breaking that to close a hole that only exists for single files would be the wrong trade. No single regex is ever handed an unbounded line, so a 50 KB line cannot stall a scan. A line longer than 2000 characters is matched in overlapping windows and again with its padding compressed, and it is reported as critical either way, because full pattern coverage cannot be promised at that length and the verdict should not go quiet about it.
 
@@ -167,6 +188,8 @@ A line with no reason is ignored on purpose. An unexplained suppression is worse
 `rules/rules.json`. Two kinds of entry: `legs` feed the trifecta verdict, `rules` stand alone with their own severity. Each needs an `id`, a `pattern` (Python regex, case-insensitive by default), a `title`, and for standalone rules a `why` that says what actually goes wrong.
 
 Set `negation_safe` when "never use X" would otherwise read as using X. Set `prose_is_code` when the sentence itself is the payload.
+
+An entry with `"pattern": null` is raised by the scanner rather than by matching a line — a skipped directory, an unreadable file, a declaration found by shape. Those still live in the rule file, so the wording of every finding stays in one place, but adding one means writing code as well.
 
 Then:
 

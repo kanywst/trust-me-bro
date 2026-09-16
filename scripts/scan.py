@@ -21,7 +21,7 @@ from pathlib import Path
 
 # The one place the version is written. The plugin manifests are checked
 # against it in CI, so a release cannot ship three numbers that disagree.
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 RULES_PATH = Path(__file__).resolve().parent.parent / "rules" / "rules.json"
 LOCK_NAME = ".trustmebro.lock"
@@ -308,15 +308,19 @@ def relative_name(root: Path, path: Path) -> str:
         return str(path)
 
 
-def scan_text(rel: str, path: Path, text: str, rules: dict) -> dict:
-    """Everything one readable file contributes. No aggregation, no policy."""
+def apply_rules(rel: str, lines: list[str], mask: list[bool], rules: dict) -> dict:
+    """Run every leg and rule over a list of lines. No aggregation, no policy.
+
+    The lines are not always a file's own. The structural pass hands this the
+    commands it reassembles out of a JSON config, so that a command JSON split
+    across three keys is judged by the same rules as one written on one line.
+    """
     findings, mentions = [], []
     legs = {"private": [], "untrusted": [], "exfil": []}
 
-    lines = text.splitlines()
-    mask = code_mask(path, lines)
-
     for entry in rules["legs"]:
+        if entry["_re"] is None:
+            continue  # raised by shape, not by text. See scan_structure.
         # Legs are capability claims, so "never read ~/.ssh" is not a claim.
         hits = match_lines(entry["_re"], lines, mask=mask, negation_safe=True)
         code_hits = [h for h in hits if h["context"] == "code"]
@@ -346,16 +350,19 @@ def scan_text(rel: str, path: Path, text: str, rules: dict) -> dict:
             }
         )
 
-    return {
-        "findings": findings,
-        "mentions": mentions,
-        "legs": legs,
-        "declares_allowed_tools": bool(re.search(r"^\s*allowed[-_]tools\s*:", text, re.IGNORECASE | re.MULTILINE)),
-        "hosts": URL_RE.findall(text),
-    }
+    return {"findings": findings, "mentions": mentions, "legs": legs}
 
 
-def synthetic(rules: dict, rule_id: str, file: str = "-", extra: str = "") -> dict:
+def scan_text(rel: str, path: Path, text: str, rules: dict) -> dict:
+    """Everything one readable file contributes as text."""
+    lines = text.splitlines()
+    result = apply_rules(rel, lines, code_mask(path, lines), rules)
+    result["declares_allowed_tools"] = bool(re.search(r"^\s*allowed[-_]tools\s*:", text, re.IGNORECASE | re.MULTILINE))
+    result["hosts"] = URL_RE.findall(text)
+    return result
+
+
+def synthetic(rules: dict, rule_id: str, file: str = "-", extra: str = "", hits: list | None = None) -> dict:
     entry = next((e for e in rules["rules"] if e["id"] == rule_id), None)
     if entry is None:
         return {}
@@ -365,8 +372,210 @@ def synthetic(rules: dict, rule_id: str, file: str = "-", extra: str = "") -> di
         "title": entry["title"] + extra,
         "why": entry["why"],
         "file": file,
-        "hits": [],
+        "hits": hits or [],
     }
+
+
+def synthetic_leg(rules: dict, leg_id: str, file: str, hits: list) -> tuple[str, dict] | None:
+    entry = next((e for e in rules["legs"] if e["id"] == leg_id), None)
+    if entry is None:
+        return None
+    return entry["leg"], {"id": entry["id"], "title": entry["title"], "file": file, "hits": hits}
+
+
+# ----------------------------------------------------------------- structure
+
+# A config is read as the structure it is, not as the text it looks like. Two
+# things made that necessary rather than nice to have. JSON splits one command
+# across several keys -- the program named under one, its arguments listed under
+# another -- and every pattern in the rule file matches within a single line, so
+# the command as written is a command no rule can see. And a declaration is not
+# a mention: a hook block is a command that runs on the agent's own events
+# without anyone invoking it, which no amount of pattern matching on the
+# surrounding text will tell you.
+CONFIG_SUFFIXES = {".json", ".jsonc"}
+# Keyed on shape, not on filename. Where a hook block lives has already moved
+# from settings.json to a plugin manifest to hooks/hooks.json, and a scanner
+# pinned to today's filenames goes quiet the next time it moves.
+MCP_MAP_KEYS = ("mcpservers", "mcp_servers", "servers")
+# Only ever applied after a strict parse has already failed, and anchored to
+# start-of-line or whitespace so the `//` in a URL is left alone.
+JSONC_COMMENT_RE = re.compile(r"(^|\s)//[^\n]*$", re.MULTILINE)
+JSON_TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
+
+
+def looks_like_config(path: Path, text: str) -> bool:
+    if path.suffix.lower() not in CONFIG_SUFFIXES:
+        return False
+    lowered = text.lower()
+    return '"hooks"' in lowered or any(f'"{key}"' in lowered for key in MCP_MAP_KEYS)
+
+
+def parse_config(text: str):
+    """Strict JSON first, then the two dialects agents actually accept."""
+    try:
+        return json.loads(text)
+    except ValueError:
+        pass
+    try:
+        relaxed = JSON_TRAILING_COMMA_RE.sub(r"\1", JSONC_COMMENT_RE.sub(r"\1", text))
+        return json.loads(relaxed)
+    except ValueError:
+        return None
+
+
+def is_server_map(value) -> bool:
+    return (
+        isinstance(value, dict)
+        and bool(value)
+        and all(isinstance(server, dict) and ("command" in server or "url" in server) for server in value.values())
+    )
+
+
+def is_hook_map(value) -> bool:
+    """Event name -> list of matcher blocks.
+
+    A plugin may instead point at a file (`"hooks": "./hooks/hooks.json"`). That
+    is a pointer, not a declaration, and the file it names is walked on its own.
+    """
+    return isinstance(value, dict) and bool(value) and all(isinstance(entry, list) for entry in value.values())
+
+
+def iter_shapes(data, trail: str = ""):
+    """Yield ("mcp" | "hooks", label, value) wherever the shape appears, at any depth."""
+    if isinstance(data, list):
+        for index, item in enumerate(data):
+            yield from iter_shapes(item, f"{trail}[{index}]")
+        return
+    if not isinstance(data, dict):
+        return
+    for key, value in data.items():
+        label = f"{trail}.{key}" if trail else str(key)
+        if str(key).lower() in MCP_MAP_KEYS and is_server_map(value):
+            for name, server in value.items():
+                yield "mcp", f"{label}.{name}", server
+        elif str(key).lower() == "hooks" and is_hook_map(value):
+            yield "hooks", label, value
+        else:
+            yield from iter_shapes(value, label)
+
+
+def hook_commands(block: dict) -> list[tuple[str, str, str]]:
+    """(event, matcher, command) for every command a hook block declares."""
+    out = []
+    for event, entries in block.items():
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            matcher = entry.get("matcher") or "*"
+            inner = entry.get("hooks")
+            for hook in inner if isinstance(inner, list) else [entry]:
+                if isinstance(hook, dict) and isinstance(hook.get("command"), str):
+                    out.append((str(event), str(matcher), hook["command"]))
+    return out
+
+
+def server_lines(server: dict) -> list[str]:
+    """The reach a server declaration grants, one line per thing that carries it."""
+    lines = []
+    command = server.get("command")
+    if isinstance(command, str):
+        args = [str(a) for a in server.get("args", []) if isinstance(a, str | int | float)]
+        lines.append(" ".join([command, *args]))
+    for key in ("url", "serverUrl", "endpoint"):
+        if isinstance(server.get(key), str):
+            lines.append(server[key])
+    for key in ("env", "headers"):
+        block = server.get(key)
+        if isinstance(block, dict):
+            lines += [f"{name}={value}" for name, value in block.items() if isinstance(name, str)]
+    return lines
+
+
+def locate(lines: list[str], label: str) -> int:
+    """The line the shape starts on, so a finding points at the block it came from."""
+    key = label.rsplit(".", 1)[-1].split("[", 1)[0]
+    needle = f'"{key}"'
+    for index, line in enumerate(lines):
+        if needle in line:
+            return index + 1
+    return 1
+
+
+def assembled_hits(texts: list[str], line: int, cap: int = 3) -> list[dict]:
+    """Quoted as reassembled, never passed off as a line that exists in the file."""
+    return [{"line": line, "text": trim(t), "context": "code", "assembled": True} for t in texts[:cap]]
+
+
+def scan_structure(rel: str, path: Path, text: str, rules: dict) -> dict | None:
+    """What a config grants by its shape, plus the commands JSON split apart.
+
+    Returns None when the file holds neither shape, so an ordinary JSON file
+    costs one substring check and nothing else.
+    """
+    if not looks_like_config(path, text):
+        return None
+
+    empty: dict[str, list[dict]] = {"private": [], "untrusted": [], "exfil": []}
+    data = parse_config(text)
+    if data is None:
+        # It named one of the shapes and then would not parse. The text pass
+        # has still read every line, so this is not a silent gap -- but the
+        # structure nobody could read is worth saying out loud, because the
+        # agent's own parser may well be more forgiving than this one.
+        return {"findings": [synthetic(rules, "SCAN-CONFIG-UNPARSED", file=rel)], "legs": empty, "ids": set()}
+
+    lines = text.splitlines()
+    findings: list[dict] = []
+    legs: dict[str, list[dict]] = {"private": [], "untrusted": [], "exfil": []}
+    # Each reassembled command is kept next to the line its block starts on, so
+    # a finding raised by one points at where it came from rather than at a
+    # position in a list that only exists inside this function.
+    reassembled: list[str] = []
+    anchors: list[int] = []
+
+    for kind, label, value in iter_shapes(data):
+        anchor = locate(lines, label)
+        if kind == "hooks":
+            commands = hook_commands(value)
+            if not commands:
+                continue
+            quoted = [f"{label}.{event} [{matcher}]  {command}" for event, matcher, command in commands]
+            findings.append(synthetic(rules, "HOOK-DECLARED", file=rel, hits=assembled_hits(quoted, anchor)))
+            reassembled += [command for _, _, command in commands]
+            anchors += [anchor] * len(commands)
+        else:
+            remote = any(isinstance(value.get(key), str) for key in ("url", "serverUrl", "endpoint"))
+            rule = "MCP-SERVER-REMOTE" if remote else "MCP-SERVER-LOCAL"
+            body = server_lines(value)
+            findings.append(synthetic(rules, rule, file=rel, extra=f" ({label})", hits=assembled_hits(body, anchor)))
+            if remote:
+                # Not an inference about this server. A remote MCP server is by
+                # construction another party deciding what comes back into the
+                # agent's context, and your tool arguments going to them.
+                hits = assembled_hits(body, anchor, cap=1)
+                for leg_id in ("UNTR-MCP-SERVER", "EXFIL-MCP-SERVER"):
+                    raised = synthetic_leg(rules, leg_id, rel, hits)
+                    if raised:
+                        legs[raised[0]].append(raised[1])
+            reassembled += body
+            anchors += [anchor] * len(body)
+
+    if reassembled:
+
+        def resite(hits: list[dict]) -> list[dict]:
+            return [{**hit, "line": anchors[hit["line"] - 1], "assembled": True} for hit in hits]
+
+        result = apply_rules(rel, reassembled, [True] * len(reassembled), rules)
+        for finding in result["findings"]:
+            finding["hits"] = resite(finding["hits"])
+            findings.append(finding)
+        for leg, entries in result["legs"].items():
+            for record in entries:
+                record["hits"] = resite(record["hits"])
+            legs[leg] += entries
+
+    return {"findings": findings, "legs": legs, "ids": {f["id"] for f in findings if f}}
 
 
 def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
@@ -429,6 +638,19 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
             longline.append(rel)
 
         result = scan_text(rel, path, text, rules)
+        structure = scan_structure(rel, path, text, rules)
+        if structure is not None:
+            # The same reach, seen twice: once as the JSON text it is written
+            # in, once as the command it reassembles into. The reassembled one
+            # quotes the whole command, so it is the one worth keeping.
+            taken = structure["ids"]
+            result["findings"] = [f for f in result["findings"] if f["id"] not in taken]
+            raised = {e["id"] for entries in structure["legs"].values() for e in entries}
+            for leg in result["legs"]:
+                result["legs"][leg] = [e for e in result["legs"][leg] if e["id"] not in raised]
+            findings += structure["findings"]
+            for leg in legs:
+                legs[leg] += structure["legs"][leg]
         findings += result["findings"]
         mentions += result["mentions"]
         for leg in legs:
@@ -774,6 +996,9 @@ def render(report: dict, color: bool) -> str:
             if finding["hits"]:
                 for hit in finding["hits"]:
                     note = "  (padding compressed)" if hit.get("compressed") else ""
+                    # A reassembled command is not a line in the file. Saying so
+                    # is the difference between evidence and a paraphrase.
+                    note = note or ("  (reassembled from JSON)" if hit.get("assembled") else "")
                     out.append(f"         {finding['file']}:{hit['line']}  {hit['text']}{note}")
             elif finding["file"] != "-":
                 out.append(f"         {finding['file']}")

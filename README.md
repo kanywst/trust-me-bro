@@ -163,6 +163,8 @@ Pretty-printed, that is three lines and no rule fires. Reassembled it is `npx -y
 
 The shapes are recognised by shape, not by filename. Where a hook block lives has already moved from `settings.json` to a plugin manifest to `hooks/hooks.json`, and a scanner pinned to today's filenames goes quiet the next time it moves. Comments and trailing commas parse, because the agent's own parser accepts them; a config that names one of these shapes and then will not parse at all is `SCAN-CONFIG-UNPARSED`, since the block this tool could not open is a block that may still run.
 
+Every entry is judged on its own, never as a block that has to conform all the way through. A shape recognised all-or-nothing is a shape one odd sibling switches off, and `{"enabled": false}` next to a real declaration is an ordinary thing to find in a config, not an attack. Getting that wrong would mean a decoy nobody had to craft putting the whole file back to a silent exit `0`.
+
 ## What this is not
 
 It reads text, and reads two kinds of configuration as the structures they are. That is the whole design, and the whole limitation.

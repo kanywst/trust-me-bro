@@ -1174,6 +1174,77 @@ class Structure(unittest.TestCase):
         report = report_for_tree({"SKILL.md": "# hi\n", "data.json": json.dumps({"a": [1, 2, 3]})})
         self.assertEqual(report["verdict"], "ok", rule_ids(report))
 
+    def test_one_disabled_entry_does_not_blind_its_siblings(self):
+        """A shape judged all-or-nothing is a shape one decoy switches off.
+
+        `{"enabled": false}` is an ordinary thing to have in a config, so this
+        needs no adversary. Requiring every sibling to conform put the whole
+        block back to exit 0, which is the bug this pass exists to close.
+        """
+        config = json.dumps(
+            {
+                "mcpServers": {
+                    "off": {"enabled": False},
+                    "notes": {"command": "npx", "args": ["-y", "pkg@latest"], "env": {"AWS_SECRET_ACCESS_KEY": "x"}},
+                    "remote": {"url": "https://mcp.example.net/sse"},
+                }
+            },
+            indent=2,
+        )
+        report = report_for_tree({".mcp.json": config})
+        self.assertIn("MCP-SERVER-LOCAL", rule_ids(report))
+        self.assertIn("MCP-SERVER-REMOTE", rule_ids(report))
+        self.assertIn("INSTALL-AT-RUNTIME", rule_ids(report))
+        self.assertTrue(report["trifecta"], rule_ids(report))
+
+    def test_one_non_list_key_does_not_blind_a_hook_block(self):
+        block = json.loads(HOOKS_JSON)
+        block["hooks"]["enabled"] = True
+        report = report_for_tree({"hooks/hooks.json": json.dumps(block, indent=2)})
+        self.assertIn("HOOK-DECLARED", rule_ids(report))
+        self.assertEqual(scan.EXIT[report["verdict"]], 1)
+
+    def test_a_server_field_spelt_in_another_case_is_still_a_server(self):
+        """server_lines reads serverUrl, so the recogniser has to know it too.
+
+        A field one of them knows about and the other does not is a silent miss.
+        """
+        config = json.dumps({"servers": {"r": {"serverUrl": "https://mcp.example.net/"}}}, indent=2)
+        report = report_for_tree({"mcp.json": config})
+        self.assertIn("MCP-SERVER-REMOTE", rule_ids(report))
+        self.assertIn("exfil", report["legs_present"])
+
+    def test_a_second_block_is_cited_at_its_own_line(self):
+        """Shapes match at any depth, so two blocks can share a key name."""
+        config = json.dumps(
+            {
+                "projects": {
+                    "a": {"mcpServers": {"one": {"url": "https://one.example.net/"}}},
+                    "b": {"mcpServers": {"two": {"url": "https://two.example.net/"}}},
+                }
+            },
+            indent=2,
+        )
+        report = report_for_tree({"settings.json": config})
+        cited = {f["hits"][0]["text"]: f["hits"][0]["line"] for f in report["findings"] if f["id"].startswith("MCP-")}
+        self.assertEqual(len(cited), 2, cited)
+        self.assertNotEqual(*cited.values())
+
+    def test_an_unrelated_match_of_the_same_rule_survives_the_merge(self):
+        """Deduping the two views must not drop a real finding further down."""
+        config = json.dumps(
+            {
+                "note": "install with pip install something",
+                "mcpServers": {"r": {"command": "npx", "args": ["-y", "pkg"]}},
+            },
+            indent=2,
+        )
+        report = report_for_tree({".mcp.json": config})
+        finding = next(f for f in report["findings"] if f["id"] == "INSTALL-AT-RUNTIME")
+        quoted = [hit["text"] for hit in finding["hits"]]
+        self.assertIn("npx -y pkg", quoted)
+        self.assertTrue(any("pip install" in text for text in quoted), quoted)
+
     def test_the_same_reach_is_not_reported_twice(self):
         """The raw JSON and the reassembled command are one finding, not two."""
         report = report_for_tree({".mcp.json": MCP_JSON})

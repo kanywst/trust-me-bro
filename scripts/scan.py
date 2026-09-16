@@ -398,6 +398,10 @@ CONFIG_SUFFIXES = {".json", ".jsonc"}
 # from settings.json to a plugin manifest to hooks/hooks.json, and a scanner
 # pinned to today's filenames goes quiet the next time it moves.
 MCP_MAP_KEYS = ("mcpservers", "mcp_servers", "servers")
+# What makes an entry a server declaration rather than some other mapping. Kept
+# next to server_lines, which reads exactly these, so the two cannot drift: a
+# field one of them knows about and the other does not is a silent miss.
+SERVER_FIELDS = ("command", "url", "serverurl", "endpoint")
 # Only ever applied after a strict parse has already failed, and anchored to
 # start-of-line or whitespace so the `//` in a URL is left alone.
 JSONC_COMMENT_RE = re.compile(r"(^|\s)//[^\n]*$", re.MULTILINE)
@@ -424,21 +428,33 @@ def parse_config(text: str):
         return None
 
 
-def is_server_map(value) -> bool:
-    return (
-        isinstance(value, dict)
-        and bool(value)
-        and all(isinstance(server, dict) and ("command" in server or "url" in server) for server in value.values())
-    )
+def server_entries(value) -> list[tuple[str, dict]]:
+    """The entries under an MCP map that declare a server, judged one at a time.
+
+    Never all-or-nothing. Requiring every sibling to conform means a single
+    `{"enabled": false}` stub beside a real declaration blinds the whole block,
+    and blinding this pass is the failure it exists to close. No adversary is
+    needed for that: a disabled entry is an ordinary thing to have in a config.
+    """
+    if not isinstance(value, dict):
+        return []
+    return [
+        (str(name), server)
+        for name, server in value.items()
+        if isinstance(server, dict) and any(str(k).lower() in SERVER_FIELDS for k in server)
+    ]
 
 
-def is_hook_map(value) -> bool:
-    """Event name -> list of matcher blocks.
+def hook_map(value) -> dict:
+    """Event name -> list of matcher blocks, keeping only the events shaped that way.
 
     A plugin may instead point at a file (`"hooks": "./hooks/hooks.json"`). That
-    is a pointer, not a declaration, and the file it names is walked on its own.
+    is a pointer, not a declaration, and the file it names is walked on its own,
+    so a value that is not a mapping yields nothing.
     """
-    return isinstance(value, dict) and bool(value) and all(isinstance(entry, list) for entry in value.values())
+    if not isinstance(value, dict):
+        return {}
+    return {str(event): entries for event, entries in value.items() if isinstance(entries, list)}
 
 
 def iter_shapes(data, trail: str = ""):
@@ -451,11 +467,13 @@ def iter_shapes(data, trail: str = ""):
         return
     for key, value in data.items():
         label = f"{trail}.{key}" if trail else str(key)
-        if str(key).lower() in MCP_MAP_KEYS and is_server_map(value):
-            for name, server in value.items():
+        servers = server_entries(value) if str(key).lower() in MCP_MAP_KEYS else []
+        events = hook_map(value) if str(key).lower() == "hooks" else {}
+        if servers:
+            for name, server in servers:
                 yield "mcp", f"{label}.{name}", server
-        elif str(key).lower() == "hooks" and is_hook_map(value):
-            yield "hooks", label, value
+        elif events:
+            yield "hooks", label, events
         else:
             yield from iter_shapes(value, label)
 
@@ -475,31 +493,58 @@ def hook_commands(block: dict) -> list[tuple[str, str, str]]:
     return out
 
 
+def field(server: dict, name: str):
+    """Case-insensitive lookup. How a config spells its keys is not this tool's to decide."""
+    for key, value in server.items():
+        if str(key).lower() == name:
+            return value
+    return None
+
+
+def server_url(server: dict) -> str | None:
+    for name in ("url", "serverurl", "endpoint"):
+        value = field(server, name)
+        if isinstance(value, str):
+            return value
+    return None
+
+
 def server_lines(server: dict) -> list[str]:
     """The reach a server declaration grants, one line per thing that carries it."""
     lines = []
-    command = server.get("command")
+    command = field(server, "command")
     if isinstance(command, str):
-        args = [str(a) for a in server.get("args", []) if isinstance(a, str | int | float)]
+        raw = field(server, "args")
+        args = [str(a) for a in raw if isinstance(a, str | int | float)] if isinstance(raw, list) else []
         lines.append(" ".join([command, *args]))
-    for key in ("url", "serverUrl", "endpoint"):
-        if isinstance(server.get(key), str):
-            lines.append(server[key])
-    for key in ("env", "headers"):
-        block = server.get(key)
+    url = server_url(server)
+    if url:
+        lines.append(url)
+    for name in ("env", "headers"):
+        block = field(server, name)
         if isinstance(block, dict):
-            lines += [f"{name}={value}" for name, value in block.items() if isinstance(name, str)]
+            lines += [f"{key}={value}" for key, value in block.items() if isinstance(key, str)]
     return lines
 
 
 def locate(lines: list[str], label: str) -> int:
-    """The line the shape starts on, so a finding points at the block it came from."""
-    key = label.rsplit(".", 1)[-1].split("[", 1)[0]
-    needle = f'"{key}"'
-    for index, line in enumerate(lines):
-        if needle in line:
-            return index + 1
-    return 1
+    """The line the shape starts on, walking the whole path rather than its last key.
+
+    Shapes are matched at any depth, so two blocks in one file can share a key
+    name. Taking the first line that happens to contain `"hooks"` would cite the
+    first block for a finding that came out of the second.
+    """
+    cursor, found = 0, 1
+    for segment in label.split("."):
+        key = segment.split("[", 1)[0]
+        if not key:
+            continue
+        needle = f'"{key}"'
+        for index in range(cursor, len(lines)):
+            if needle in lines[index]:
+                cursor, found = index, index + 1
+                break
+    return found
 
 
 def assembled_hits(texts: list[str], line: int, cap: int = 3) -> list[dict]:
@@ -545,7 +590,7 @@ def scan_structure(rel: str, path: Path, text: str, rules: dict) -> dict | None:
             reassembled += [command for _, _, command in commands]
             anchors += [anchor] * len(commands)
         else:
-            remote = any(isinstance(value.get(key), str) for key in ("url", "serverUrl", "endpoint"))
+            remote = server_url(value) is not None
             rule = "MCP-SERVER-REMOTE" if remote else "MCP-SERVER-LOCAL"
             body = server_lines(value)
             findings.append(synthetic(rules, rule, file=rel, extra=f" ({label})", hits=assembled_hits(body, anchor)))
@@ -575,7 +620,31 @@ def scan_structure(rel: str, path: Path, text: str, rules: dict) -> dict | None:
                 record["hits"] = resite(record["hits"])
             legs[leg] += entries
 
-    return {"findings": findings, "legs": legs, "ids": {f["id"] for f in findings if f}}
+    return {"findings": [f for f in findings if f], "legs": legs}
+
+
+def merge_entries(primary: list[dict], secondary: list[dict], cap: int = 3) -> list[dict]:
+    """One entry per id and file, seen structurally first and then as raw text.
+
+    Merged rather than replaced. Dropping the text entry outright would also
+    drop an unrelated match of the same rule further down the same file, which
+    is a real finding lost to tidy output.
+    """
+    out = list(primary)
+    index = {(entry["id"], entry["file"]): entry for entry in out}
+    for entry in secondary:
+        existing = index.get((entry["id"], entry["file"]))
+        if existing is None:
+            out.append(entry)
+            index[(entry["id"], entry["file"])] = entry
+            continue
+        seen = {(hit["line"], hit["text"]) for hit in existing["hits"]}
+        for hit in entry["hits"]:
+            if (hit["line"], hit["text"]) not in seen:
+                existing["hits"].append(hit)
+                seen.add((hit["line"], hit["text"]))
+        existing["hits"] = existing["hits"][:cap]
+    return out
 
 
 def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
@@ -641,16 +710,12 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
         structure = scan_structure(rel, path, text, rules)
         if structure is not None:
             # The same reach, seen twice: once as the JSON text it is written
-            # in, once as the command it reassembles into. The reassembled one
-            # quotes the whole command, so it is the one worth keeping.
-            taken = structure["ids"]
-            result["findings"] = [f for f in result["findings"] if f["id"] not in taken]
-            raised = {e["id"] for entries in structure["legs"].values() for e in entries}
+            # in, once as the command it reassembles into. The reassembled view
+            # leads, because it quotes the whole command rather than whichever
+            # fragment a line happened to hold.
+            result["findings"] = merge_entries(structure["findings"], result["findings"])
             for leg in result["legs"]:
-                result["legs"][leg] = [e for e in result["legs"][leg] if e["id"] not in raised]
-            findings += structure["findings"]
-            for leg in legs:
-                legs[leg] += structure["legs"][leg]
+                result["legs"][leg] = merge_entries(structure["legs"][leg], result["legs"][leg])
         findings += result["findings"]
         mentions += result["mentions"]
         for leg in legs:

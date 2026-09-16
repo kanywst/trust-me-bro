@@ -1092,11 +1092,34 @@ class Structure(unittest.TestCase):
         self.assertTrue(all(hit["assembled"] for hit in finding["hits"]))
         self.assertIn("(reassembled from JSON)", scan.render(report, color=False))
 
-    def test_a_pointer_to_a_hook_file_is_not_a_declaration(self):
-        """`"hooks": "./hooks/hooks.json"` declares nothing. The file is walked itself."""
+    def test_a_pointer_to_a_hook_file_in_the_tree_is_not_a_declaration(self):
+        """`"hooks": "./hooks/hooks.json"` declares nothing -- the file is walked itself.
+
+        Which only holds when the file is actually there. The pointer is the
+        manifest's claim; that the target was read is what makes it harmless.
+        """
         manifest = json.dumps({"name": "x", "version": "1.0.0", "hooks": "./hooks/hooks.json"}, indent=2)
-        report = report_for_tree({"plugin.json": manifest})
-        self.assertNotIn("HOOK-DECLARED", rule_ids(report))
+        report = report_for_tree({"plugin.json": manifest, "hooks/hooks.json": HOOKS_JSON})
+        ids = rule_ids(report)
+        self.assertNotIn("HOOK-POINTER-UNREAD", ids)
+        # Raised by the file it points at, and cited there rather than on the manifest.
+        declared = next(f for f in report["findings"] if f["id"] == "HOOK-DECLARED")
+        self.assertEqual(declared["file"], str(Path("hooks/hooks.json")))
+
+    def test_a_pointer_to_a_hook_file_that_was_not_scanned_is_a_finding(self):
+        """The hook still registers at install time. Nothing here read what runs."""
+        for pointer in ("./hooks/hooks.json", "../outside/hooks.json", "/etc/hooks.json"):
+            with self.subTest(pointer=pointer):
+                manifest = json.dumps({"name": "x", "version": "1.0.0", "hooks": pointer}, indent=2)
+                report = report_for_tree({"plugin.json": manifest})
+                self.assertIn("HOOK-POINTER-UNREAD", rule_ids(report))
+                self.assertEqual(scan.EXIT[report["verdict"]], 1)
+
+    def test_a_plugin_manifest_pointer_resolves_from_the_plugin_root(self):
+        """A manifest's paths are relative to the plugin, not to .claude-plugin/."""
+        manifest = json.dumps({"name": "x", "version": "1.0.0", "hooks": "./hooks/hooks.json"}, indent=2)
+        report = report_for_tree({".claude-plugin/plugin.json": manifest, "hooks/hooks.json": HOOKS_JSON})
+        self.assertNotIn("HOOK-POINTER-UNREAD", rule_ids(report))
 
     def test_a_husky_style_hook_map_with_no_commands_is_not_a_finding(self):
         """Values are lists, so the shape matches. No command means no declaration."""

@@ -518,13 +518,32 @@ def server_entries(value) -> list[tuple[str, dict]]:
 def hook_map(value) -> dict:
     """Event name -> list of matcher blocks, keeping only the events shaped that way.
 
-    A plugin may instead point at a file (`"hooks": "./hooks/hooks.json"`). That
-    is a pointer, not a declaration, and the file it names is walked on its own,
-    so a value that is not a mapping yields nothing.
+    A plugin may instead point at a file (`"hooks": "./hooks/hooks.json"`), which
+    is a pointer rather than a declaration. Those are handled separately, because
+    the pointer is only harmless if the file it names is one this scan read.
     """
     if not isinstance(value, dict):
         return {}
     return {str(event): entries for event, entries in value.items() if isinstance(entries, list)}
+
+
+def pointer_target(root: Path, path: Path, pointer: str) -> Path | None:
+    """Where a `"hooks": "./file.json"` pointer lands, if it lands inside the target.
+
+    Tried against the config's own directory and against the scan root, because
+    a plugin manifest's paths are relative to the plugin and not to the
+    `.claude-plugin` directory the manifest sits in. Never resolved through a
+    symlink: following one is the thing the walk itself refuses to do.
+    """
+    base = root if root.is_dir() else root.parent
+    for start in (path.parent, base):
+        try:
+            candidate = Path(os.path.normpath(start / pointer))
+            if candidate.is_relative_to(base) and candidate.exists():
+                return candidate
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 def iter_shapes(data, trail: str = ""):
@@ -544,6 +563,8 @@ def iter_shapes(data, trail: str = ""):
                 yield "mcp", f"{label}.{name}", server
         elif events:
             yield "hooks", label, events
+        elif str(key).lower() == "hooks" and isinstance(value, str):
+            yield "hook-pointer", label, value
         else:
             yield from iter_shapes(value, label)
 
@@ -644,7 +665,7 @@ def assembled_hits(texts: list[str], line: int, cap: int = 3) -> list[dict]:
     return [{"line": line, "text": trim(t), "context": "code", "assembled": True} for t in texts[:cap]]
 
 
-def scan_structure(rel: str, path: Path, text: str, rules: dict) -> dict | None:
+def scan_structure(root: Path, rel: str, path: Path, text: str, rules: dict) -> dict | None:
     """What a config grants by its shape, plus the commands JSON split apart.
 
     Returns None when the file holds neither shape, so an ordinary JSON file
@@ -688,7 +709,15 @@ def scan_structure(rel: str, path: Path, text: str, rules: dict) -> dict | None:
 
     for kind, label, value in shapes:
         anchor = locate(index, label)
-        if kind == "hooks":
+        if kind == "hook-pointer":
+            # A pointer is harmless only if it names a file this scan read. One
+            # that leaves the tree, or names nothing at all, still registers a
+            # hook on the machine it is installed on, and the command in it is
+            # then the thing nothing here has looked at.
+            if pointer_target(root, path, value) is None:
+                hits = assembled_hits([f"{label}  {value}"], anchor)
+                findings.append(synthetic(rules, "HOOK-POINTER-UNREAD", file=rel, hits=hits))
+        elif kind == "hooks":
             commands = hook_commands(value)
             if not commands:
                 continue
@@ -814,7 +843,7 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
             longline.append(rel)
 
         result = scan_text(rel, path, text, rules)
-        structure = scan_structure(rel, path, text, rules)
+        structure = scan_structure(root, rel, path, text, rules)
         if structure is not None:
             # The same reach, seen twice: once as the JSON text it is written
             # in, once as the command it reassembles into. The reassembled view

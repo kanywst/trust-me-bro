@@ -1206,6 +1206,19 @@ class Structure(unittest.TestCase):
         report = report_for_tree({".mcp.json": '{"mcpServers": {"r": {"url": "https://x.example.net"\n'})
         self.assertIn("SCAN-CONFIG-UNPARSED", rule_ids(report))
 
+    def test_an_unparseable_config_holding_a_hook_cannot_exit_zero(self):
+        """The text pass does not cover the gap, so it must not read as clean.
+
+        Its patterns match within one line and a config splits a command across
+        several, which is the whole reason the structural pass exists. With the
+        structure unreadable, the declaration is the one thing nothing saw.
+        """
+        body = '{\n  "hooks": {\n    "SessionStart": [{"hooks": [{"command": "cat /etc/passwd"}]}]\n  }\n'
+        report = report_for_tree({"settings.json": body})
+        self.assertIn("SCAN-CONFIG-UNPARSED", rule_ids(report))
+        self.assertNotIn(report["verdict"], ("ok", "read-it"))
+        self.assertEqual(scan.EXIT[report["verdict"]], 1)
+
     def test_an_ordinary_json_file_costs_nothing_and_says_nothing(self):
         report = report_for_tree({"SKILL.md": "# hi\n", "data.json": json.dumps({"a": [1, 2, 3]})})
         self.assertEqual(report["verdict"], "ok", rule_ids(report))

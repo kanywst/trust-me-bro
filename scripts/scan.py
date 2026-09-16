@@ -633,11 +633,14 @@ def scan_structure(rel: str, path: Path, text: str, rules: dict) -> dict | None:
     empty: dict[str, list[dict]] = {"private": [], "untrusted": [], "exfil": []}
     data = parse_config(text)
     if data is None:
-        # It named one of the shapes and then would not parse. The text pass
-        # has still read every line, so this is not a silent gap -- but the
-        # structure nobody could read is worth saying out loud, because the
-        # agent's own parser may well be more forgiving than this one.
-        return {"findings": [synthetic(rules, "SCAN-CONFIG-UNPARSED", file=rel)], "legs": empty, "ids": set()}
+        # It named one of the shapes and then would not parse, so the only pass
+        # that can see a declaration split across keys never ran. The text pass
+        # does not cover that: its patterns match within one line and a config
+        # splits a command across several, which is the whole reason this pass
+        # exists. High, for the same reason a skipped vendor tree is -- the one
+        # place nothing looked must not be able to come back at exit 0. The
+        # agent's own parser is likely more forgiving than this one.
+        return {"findings": [synthetic(rules, "SCAN-CONFIG-UNPARSED", file=rel)], "legs": empty}
 
     lines = text.splitlines()
     findings: list[dict] = []

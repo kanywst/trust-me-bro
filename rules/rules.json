@@ -325,6 +325,13 @@
       "why": "The text pass read every line, but its patterns only match within one line, and a config splits a command across several -- which is the whole reason the structural pass exists. So the declaration in here is the one thing nothing has looked at, and the agent's own parser is likely more forgiving than this one. Read it yourself."
     },
     {
+      "id": "HOOK-POINTER-UNREAD",
+      "severity": "high",
+      "pattern": null,
+      "title": "points at a hook file that is not in what was scanned",
+      "why": "The hook still registers when this is installed, but the file holding its commands is outside the target, or is not there at all, so nothing here has read what will run. A pointer is only harmless when the thing it points at was read too."
+    },
+    {
       "id": "HOOK-DECLARED",
       "severity": "high",
       "pattern": null,

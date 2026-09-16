@@ -99,6 +99,7 @@ python3 scripts/scan.py ./some-skill
 | `PERSIST-AGENT-CONFIG-WRITE` | writes to your agent's config or installs a hook |
 | `PERSIST-SHELL-PROFILE` | installs itself into your shell or a scheduler |
 | `HOOK-DECLARED` | declares a hook: a command that runs on the agent's own events |
+| `HOOK-POINTER-UNREAD` | points at a hook file that is not in what was scanned |
 | `MCP-SERVER-REMOTE` | declares a remote MCP server |
 | `MCP-SERVER-LOCAL` | declares a local MCP server |
 
@@ -149,7 +150,7 @@ Injection wording is the exception. A skill is instructions, so a sentence telli
 
 Three things now ship in the same folder, and only one of them is a document. A `SKILL.md` is read. A hook block and an MCP server declaration are *executed configuration*, and reading them as text loses what they say.
 
-**A hook is a command nobody invokes.** `hooks/hooks.json` — or the same block inside a plugin manifest or a `settings.json` — binds a command to one of the agent's own events. Install the plugin and the command runs when the agent reaches that event, before you see the result, whether or not you ever use the skill. So the declaration itself is the finding, `HOOK-DECLARED` at **high**, and the command it binds is then scanned like any other command. A plugin that points at a hook file instead of declaring one (`"hooks": "./hooks/hooks.json"`) declares nothing here; the file it names is walked on its own.
+**A hook is a command nobody invokes.** `hooks/hooks.json` — or the same block inside a plugin manifest or a `settings.json` — binds a command to one of the agent's own events. Install the plugin and the command runs when the agent reaches that event, before you see the result, whether or not you ever use the skill. So the declaration itself is the finding, `HOOK-DECLARED` at **high**, and the command it binds is then scanned like any other command. A plugin that points at a hook file instead of declaring one (`"hooks": "./hooks/hooks.json"`) declares nothing here, provided the file it names is one this scan actually read. If the pointer leaves the target, or names nothing at all, that is `HOOK-POINTER-UNREAD` at **high**: the hook still registers when the plugin is installed, and the commands in it are then the thing nothing here has looked at. A pointer is only harmless when the thing it points at was read too.
 
 **A remote MCP server is both of the other two legs.** Your tool arguments go to whoever runs it, and whatever comes back enters the agent's context as trusted tool output. That is the outbound channel and the untrusted content, by construction rather than by pattern, so `MCP-SERVER-REMOTE` raises both legs. A skill that also reads a credential is then the trifecta, and says **STOP**.
 

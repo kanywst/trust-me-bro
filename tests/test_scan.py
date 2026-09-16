@@ -1219,6 +1219,32 @@ class Structure(unittest.TestCase):
         self.assertNotIn(report["verdict"], ("ok", "read-it"))
         self.assertEqual(scan.EXIT[report["verdict"]], 1)
 
+    def test_nesting_too_deep_to_decode_is_a_finding_and_not_a_crash(self):
+        """A hostile config picks its own depth, and json raises RecursionError.
+
+        That is not a ValueError, so uncaught it took the whole run down before
+        any file got a report or a lock -- worse than the finding it should be.
+        """
+        body = '{"mcpServers": ' + "[" * 200_000 + "]" * 200_000 + "}"
+        report = report_for_tree({".mcp.json": body})
+        self.assertIn("SCAN-CONFIG-UNPARSED", rule_ids(report))
+        self.assertNotEqual(scan.EXIT[report["verdict"]], 0)
+
+    def test_a_config_of_many_entries_does_not_take_quadratic_time(self):
+        """Ten thousand stubs is a small file, not a sophisticated attack.
+
+        Rescanning the file to site each shape is O(shapes x lines), which for
+        an audit people run before installing means it never finishes.
+        """
+        import time
+
+        config = json.dumps({"mcpServers": {f"s{i}": {"command": "true"} for i in range(6000)}}, indent=2)
+        started = time.perf_counter()
+        report = report_for_tree({".mcp.json": config})
+        elapsed = time.perf_counter() - started
+        self.assertIn("MCP-SERVER-LOCAL", rule_ids(report))
+        self.assertLess(elapsed, 10.0, f"{elapsed:.1f}s for 6000 entries")
+
     def test_an_ordinary_json_file_costs_nothing_and_says_nothing(self):
         report = report_for_tree({"SKILL.md": "# hi\n", "data.json": json.dumps({"a": [1, 2, 3]})})
         self.assertEqual(report["verdict"], "ok", rule_ids(report))

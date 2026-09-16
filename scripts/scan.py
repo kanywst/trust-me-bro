@@ -12,6 +12,7 @@ Stdlib only. No network. No install step. Point it at a directory or a file.
 from __future__ import annotations
 
 import argparse
+import bisect
 import hashlib
 import json
 import os
@@ -596,23 +597,45 @@ def server_lines(server: dict) -> list[str]:
     return lines
 
 
-def locate(lines: list[str], label: str) -> int:
+# Quoted tokens, which is where a key can be. Linear by construction -- one
+# bounded character class, no alternation, nothing to backtrack into -- so this
+# is the one place a line is matched without the window guard the rules use.
+QUOTED_RE = re.compile(r'"([^"\\]{1,200})"')
+
+
+def key_lines(lines: list[str]) -> dict[str, list[int]]:
+    """Every quoted token and the lines it appears on, built once per file.
+
+    Rescanning the file per shape is O(shapes x lines), and ten thousand stub
+    entries is a small config that would sit there for minutes before printing
+    anything. For an audit people run before installing, a target that never
+    finishes is its own kind of failure.
+    """
+    index: dict[str, list[int]] = {}
+    for number, line in enumerate(lines, 1):
+        for match in QUOTED_RE.finditer(line):
+            found = index.setdefault(match.group(1), [])
+            if not found or found[-1] != number:
+                found.append(number)
+    return index
+
+
+def locate(index: dict[str, list[int]], label: str) -> int:
     """The line the shape starts on, walking the whole path rather than its last key.
 
     Shapes are matched at any depth, so two blocks in one file can share a key
     name. Taking the first line that happens to contain `"hooks"` would cite the
     first block for a finding that came out of the second.
     """
-    cursor, found = 0, 1
+    found = 1
     for segment in label.split("."):
         key = segment.split("[", 1)[0]
-        if not key:
+        candidates = index.get(key) if key else None
+        if not candidates:
             continue
-        needle = f'"{key}"'
-        for index in range(cursor, len(lines)):
-            if needle in lines[index]:
-                cursor, found = index, index + 1
-                break
+        position = bisect.bisect_left(candidates, found)
+        if position < len(candidates):
+            found = candidates[position]
     return found
 
 
@@ -630,19 +653,31 @@ def scan_structure(rel: str, path: Path, text: str, rules: dict) -> dict | None:
     if not looks_like_config(path, text):
         return None
 
+    # It named one of the shapes and the structure could not be read -- because
+    # it would not parse, or because it is nested past what the interpreter will
+    # walk. Either way the only pass that can see a declaration split across
+    # keys never ran, and the text pass does not cover that: its patterns match
+    # within one line and a config splits a command across several, which is the
+    # whole reason this pass exists. High, for the same reason a skipped vendor
+    # tree is -- the one place nothing looked must not be able to come back at
+    # exit 0. The agent's own parser is likely more forgiving than this one.
     empty: dict[str, list[dict]] = {"private": [], "untrusted": [], "exfil": []}
-    data = parse_config(text)
-    if data is None:
-        # It named one of the shapes and then would not parse, so the only pass
-        # that can see a declaration split across keys never ran. The text pass
-        # does not cover that: its patterns match within one line and a config
-        # splits a command across several, which is the whole reason this pass
-        # exists. High, for the same reason a skipped vendor tree is -- the one
-        # place nothing looked must not be able to come back at exit 0. The
-        # agent's own parser is likely more forgiving than this one.
-        return {"findings": [synthetic(rules, "SCAN-CONFIG-UNPARSED", file=rel)], "legs": empty}
+    unreadable = {"findings": [synthetic(rules, "SCAN-CONFIG-UNPARSED", file=rel)], "legs": empty}
+
+    # A hostile config picks its own nesting depth, and the decoder raises
+    # RecursionError rather than ValueError for it. Uncaught, that took the
+    # whole run down before any file got a report or a lock -- a crash being
+    # strictly worse than the finding this branch exists to raise.
+    try:
+        data = parse_config(text)
+        if data is None:
+            return unreadable
+        shapes = list(iter_shapes(data))
+    except RecursionError:
+        return unreadable
 
     lines = text.splitlines()
+    index = key_lines(lines)
     findings: list[dict] = []
     legs: dict[str, list[dict]] = {"private": [], "untrusted": [], "exfil": []}
     # Each reassembled command is kept next to the line its block starts on, so
@@ -651,8 +686,8 @@ def scan_structure(rel: str, path: Path, text: str, rules: dict) -> dict | None:
     reassembled: list[str] = []
     anchors: list[int] = []
 
-    for kind, label, value in iter_shapes(data):
-        anchor = locate(lines, label)
+    for kind, label, value in shapes:
+        anchor = locate(index, label)
         if kind == "hooks":
             commands = hook_commands(value)
             if not commands:

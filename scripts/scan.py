@@ -539,11 +539,31 @@ def pointer_target(root: Path, path: Path, pointer: str) -> Path | None:
     for start in (path.parent, base):
         try:
             candidate = Path(os.path.normpath(start / pointer))
-            if candidate.is_relative_to(base) and candidate.exists():
+            if candidate.is_relative_to(base) and candidate.is_file() and was_walked(base, candidate):
                 return candidate
         except (OSError, ValueError):
             continue
     return None
+
+
+def was_walked(base: Path, candidate: Path) -> bool:
+    """Whether the walk would actually have reached this path.
+
+    Existing is not the same as read. The walk skips vendor and metadata
+    directories and never descends or reads through a symlink, so a pointer at
+    `hooks.json -> ../../elsewhere` or at anything inside `.git` names a file
+    no rule has opened. Treating those as read is the same silence the pointer
+    check exists to break, one level further in.
+    """
+    relative = candidate.relative_to(base)
+    if any(part in SKIP_DIRS for part in relative.parts):
+        return False
+    walked = base
+    for part in relative.parts:
+        walked = walked / part
+        if walked.is_symlink():
+            return False
+    return True
 
 
 def iter_shapes(data, trail: str = ""):

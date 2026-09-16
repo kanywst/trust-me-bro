@@ -199,7 +199,7 @@ python3 -m unittest discover -s tests
 
 Add a test with your rule. A rule with no test is a rule that will be broken by the next one, and CI enforces that for critical rules: any `critical` entry the fixtures never trigger fails the build.
 
-CI also runs the suite on Linux, macOS and Windows across Python 3.10 to 3.13, checks the command-line contract against both fixtures end to end, lints with ruff and markdownlint, compiles every regex in the rule file, and runs CodeQL and OpenSSF Scorecard.
+CI also runs the suite on Linux, macOS and Windows across Python 3.10 to 3.14, checks the command-line contract against both fixtures end to end, lints with ruff and markdownlint, compiles every regex in the rule file, and runs CodeQL and OpenSSF Scorecard.
 
 ## Calibration
 

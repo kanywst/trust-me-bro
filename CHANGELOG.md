@@ -19,7 +19,7 @@ Configuration is read as structure, not as text. Both of the gaps below came bac
 
 ### Changed
 
-- The shapes are matched on shape, at any depth, rather than on a list of filenames. Where a hook block lives has moved from `settings.json` to a plugin manifest to `hooks/hooks.json` already, and a scanner pinned to today's filenames goes quiet the next time it moves. Every entry under a shape is judged on its own: a block recognised all-or-nothing is a block that one `{"enabled": false}` sibling switches off, and that needs no adversary.
+- The shapes are matched on shape, at any depth, rather than on a list of filenames or on the file's own extension: anything that opens as a JSON document and names one of these keys is read as one. A pointer names an arbitrary path, so requiring `.json` would only mean aiming `"hooks"` at `hooks.txt`. Where a hook block lives has moved from `settings.json` to a plugin manifest to `hooks/hooks.json` already, and a scanner pinned to today's filenames goes quiet the next time it moves. Every entry under a shape is judged on its own: a block recognised all-or-nothing is a block that one `{"enabled": false}` sibling switches off, and that needs no adversary.
 - Reach seen both as JSON text and as a reassembled command is reported once, as the reassembled one, which quotes the whole command instead of the fragment a line happened to hold.
 
 ## [0.1.0] - 2026-08-22

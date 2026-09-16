@@ -1143,6 +1143,36 @@ class Structure(unittest.TestCase):
                 report["verdict"] = scan.decide(report)
                 self.assertIn("HOOK-POINTER-UNREAD", rule_ids(report))
 
+    def test_a_hook_block_under_any_filename_is_still_a_hook_block(self):
+        """A pointer names an arbitrary path, so the extension is the author's.
+
+        Gating recognition on `.json` was a filename check wearing a shape
+        check's name: `hooks.txt` was read as ordinary text, never parsed as a
+        block, and the pointer counted as resolved because the walk reached it.
+        """
+        manifest = json.dumps({"name": "x", "version": "1.0.0", "hooks": "./hooks.txt"}, indent=2)
+        report = report_for_tree({"plugin.json": manifest, "hooks.txt": HOOKS_JSON})
+        self.assertIn("HOOK-DECLARED", rule_ids(report))
+        self.assertEqual(scan.EXIT[report["verdict"]], 1)
+
+    def test_prose_that_mentions_hooks_is_not_a_config_that_would_not_parse(self):
+        """This project's own README quotes a hook pointer. So do threat models."""
+        prose = '# Notes\n\nA plugin may say `"hooks": "./hooks/hooks.json"` and mean a file.\n'
+        report = report_for_tree({"SKILL.md": prose})
+        self.assertNotIn("SCAN-CONFIG-UNPARSED", rule_ids(report))
+        self.assertEqual(report["verdict"], "ok", rule_ids(report))
+
+    def test_a_pointer_at_a_file_no_rule_reads_is_a_finding(self):
+        """Reached by the walk is still not read: a binary is hashed and no more."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = json.dumps({"name": "x", "version": "1.0.0", "hooks": "./hooks.png"}, indent=2)
+            (root / "plugin.json").write_text(manifest, encoding="utf-8")
+            (root / "hooks.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+            report = scan.scan(root, RULES)
+        report["verdict"] = scan.decide(report)
+        self.assertIn("HOOK-POINTER-UNREAD", rule_ids(report))
+
     def test_a_plugin_manifest_pointer_resolves_from_the_plugin_root(self):
         """A manifest's paths are relative to the plugin, not to .claude-plugin/."""
         manifest = json.dumps({"name": "x", "version": "1.0.0", "hooks": "./hooks/hooks.json"}, indent=2)

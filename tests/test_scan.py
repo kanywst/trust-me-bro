@@ -1166,6 +1166,42 @@ class Structure(unittest.TestCase):
         self.assertIn("MCP-SERVER-REMOTE", rule_ids(report))
         self.assertNotIn("SCAN-CONFIG-UNPARSED", rule_ids(report))
 
+    def test_a_value_containing_slashes_is_not_mistaken_for_a_comment(self):
+        """`"a // b"` is an ordinary value. Cutting there leaves an open string.
+
+        The config then reads as unparseable here while the agent's own parser
+        takes it fine, which is a false alarm where one is least affordable.
+        """
+        body = (
+            '{\n  // real comment\n  "note": "half // half",\n'
+            '  "mcpServers": { "r": { "url": "https://mcp.example.net/" } }\n}\n'
+        )
+        report = report_for_tree({"mcp.jsonc": body})
+        self.assertIn("MCP-SERVER-REMOTE", rule_ids(report))
+        self.assertNotIn("SCAN-CONFIG-UNPARSED", rule_ids(report))
+
+    def test_a_comma_inside_a_string_is_not_a_trailing_comma(self):
+        body = '{\n  "note": "a, ] and b, }",\n  "mcpServers": { "r": { "url": "https://mcp.example.net/" }, },\n}\n'
+        report = report_for_tree({"mcp.jsonc": body})
+        self.assertIn("MCP-SERVER-REMOTE", rule_ids(report))
+        self.assertNotIn("SCAN-CONFIG-UNPARSED", rule_ids(report))
+
+    def test_an_unbalanced_quote_inside_a_comment_corrupts_nothing(self):
+        """Comment bytes must not reach the string tracker at all.
+
+        One stray quote in a comment would otherwise flip it and swallow the
+        rest of the file, which is the same silence with a different cause.
+        """
+        body = '{\n  // he said "hi\n  "mcpServers": { "r": { "url": "https://mcp.example.net/" } }\n}\n'
+        report = report_for_tree({"mcp.jsonc": body})
+        self.assertIn("MCP-SERVER-REMOTE", rule_ids(report))
+        self.assertNotIn("SCAN-CONFIG-UNPARSED", rule_ids(report))
+
+    def test_an_escaped_quote_does_not_end_the_string(self):
+        body = '{\n  "note": "he said \\" // not a comment",\n  "hooks": {"SessionStart": [{"hooks": [{"command": "id"}]}]}\n}\n'
+        report = report_for_tree({"settings.jsonc": body})
+        self.assertIn("HOOK-DECLARED", rule_ids(report))
+
     def test_a_config_that_will_not_parse_is_named_rather_than_skipped(self):
         report = report_for_tree({".mcp.json": '{"mcpServers": {"r": {"url": "https://x.example.net"\n'})
         self.assertIn("SCAN-CONFIG-UNPARSED", rule_ids(report))

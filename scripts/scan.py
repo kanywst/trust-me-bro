@@ -402,10 +402,80 @@ MCP_MAP_KEYS = ("mcpservers", "mcp_servers", "servers")
 # next to server_lines, which reads exactly these, so the two cannot drift: a
 # field one of them knows about and the other does not is a silent miss.
 SERVER_FIELDS = ("command", "url", "serverurl", "endpoint")
-# Only ever applied after a strict parse has already failed, and anchored to
-# start-of-line or whitespace so the `//` in a URL is left alone.
-JSONC_COMMENT_RE = re.compile(r"(^|\s)//[^\n]*$", re.MULTILINE)
-JSON_TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
+
+
+def walk_json_strings(text: str):
+    """Yield (index, char, in_string) once per character, tracking string state.
+
+    Both relaxations below have to know whether they are inside a string, and a
+    regex cannot: `"note": "a // b"` is an ordinary value, and cutting the line
+    at the slashes leaves an unterminated string. The config then reads as
+    unparseable to this tool while the agent's own parser takes it fine, which
+    is a false alarm in the one place this tool can least afford one.
+    """
+    index, length, in_string = 0, len(text), False
+    while index < length:
+        char = text[index]
+        if in_string and char == "\\" and index + 1 < length:
+            yield index, char, True
+            yield index + 1, text[index + 1], True
+            index += 2
+            continue
+        yield index, char, in_string
+        if char == '"':
+            in_string = not in_string
+        index += 1
+
+
+def strip_comments(text: str) -> str:
+    """Drop `//` and `/* */` outside strings. Agents accept them; so does this.
+
+    Walks the text itself rather than reusing walk_json_strings, because the
+    characters it skips must not reach the string tracker at all. A comment
+    holding one unbalanced quote -- `// he said "hi` -- would otherwise flip
+    the tracker and quietly corrupt everything after it.
+    """
+    out: list[str] = []
+    index, length, in_string = 0, len(text), False
+    while index < length:
+        char = text[index]
+        if in_string:
+            out.append(char)
+            if char == "\\" and index + 1 < length:
+                out.append(text[index + 1])
+                index += 2
+                continue
+            if char == '"':
+                in_string = False
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "/" and index + 1 < length and text[index + 1] == "/":
+            end = text.find("\n", index)
+            index = length if end == -1 else end
+            continue
+        elif char == "/" and index + 1 < length and text[index + 1] == "*":
+            end = text.find("*/", index + 2)
+            index = length if end == -1 else end + 2
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def strip_trailing_commas(text: str) -> str:
+    """Drop a comma whose next non-space character closes the container."""
+    out: list[str] = []
+    for index, char, in_string in walk_json_strings(text):
+        if not in_string and char == ",":
+            after = index + 1
+            while after < len(text) and text[after].isspace():
+                after += 1
+            if after < len(text) and text[after] in "}]":
+                continue
+        out.append(char)
+    return "".join(out)
 
 
 def looks_like_config(path: Path, text: str) -> bool:
@@ -422,8 +492,7 @@ def parse_config(text: str):
     except ValueError:
         pass
     try:
-        relaxed = JSON_TRAILING_COMMA_RE.sub(r"\1", JSONC_COMMENT_RE.sub(r"\1", text))
-        return json.loads(relaxed)
+        return json.loads(strip_trailing_commas(strip_comments(text)))
     except ValueError:
         return None
 

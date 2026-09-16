@@ -319,10 +319,10 @@
     },
     {
       "id": "SCAN-CONFIG-UNPARSED",
-      "severity": "low",
+      "severity": "high",
       "pattern": null,
       "title": "a config named a hook or MCP block and then would not parse",
-      "why": "Every line of it was still read as text, so nothing here is unexamined. But the structure was not, and the agent's own parser is likely more forgiving than this one, so a block this tool could not open is a block that may still run."
+      "why": "The text pass read every line, but its patterns only match within one line, and a config splits a command across several -- which is the whole reason the structural pass exists. So the declaration in here is the one thing nothing has looked at, and the agent's own parser is likely more forgiving than this one. Read it yourself."
     },
     {
       "id": "HOOK-DECLARED",

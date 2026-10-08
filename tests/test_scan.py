@@ -1,10 +1,12 @@
 """Run with: python3 -m unittest discover -s tests -v"""
 
+import io
 import json
 import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from typing import ClassVar
 
@@ -452,55 +454,85 @@ class Coverage(unittest.TestCase):
         self.assertNotIn("SCAN-NOT-READ", rule_ids(report))
         self.assertEqual(scan.decide(report), "review")
 
-    def test_every_compiled_form_python_will_run_is_reported(self):
-        """An extension module is tried before the .py of the same name, so it is
-        the same swap as a .pyc from the other side. Each suffix is asserted on
-        its own: a set that silently lost one would still pass a test of the rest."""
-        names = [
-            "old.pyo",
-            "utils.cpython-312-x86_64-linux-gnu.so",
-            "utils.cp312-win_amd64.pyd",
-            "lib.dylib",
-            "lib.dll",
-        ]
+    def flagged_compiled(self, name: str, data: bytes) -> bool:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "SKILL.md").write_text("# hi\n", encoding="utf-8")
             (root / "utils.py").write_text("def f():\n    return 1\n", encoding="utf-8")
-            for name in names:
-                (root / name).write_bytes(b"\x7fELF" + bytes(12))
+            (root / name).write_bytes(data)
             report = scan.scan(root, RULES)
-        flagged = sorted(f["file"] for f in report["findings"] if f["id"] == "OBFUS-COMPILED-CODE")
-        self.assertEqual(flagged, sorted(names))
-        self.assertNotIn("SCAN-NOT-READ", rule_ids(report))
-        self.assertEqual(scan.decide(report), "review")
+        hit = [f["file"] for f in report["findings"] if f["id"] == "OBFUS-COMPILED-CODE"]
+        if hit:
+            self.assertEqual(hit, [name])
+            self.assertNotIn("SCAN-NOT-READ", rule_ids(report))
+            self.assertEqual(scan.decide(report), "review")
+        return bool(hit)
+
+    def test_every_compiled_name_is_reported(self):
+        """An extension module is tried before the .py of the same name, the same
+        swap as a .pyc from the other side, and Python imports straight out of a
+        .pyz, .whl or .egg. The bytes carry no header, so each name is asserted on
+        its own: a suffix that silently went missing fails here."""
+        for name in [
+            "old.pyo",
+            "utils.cpython-312-x86_64-linux-gnu.so",
+            "libfoo.so.1",
+            "utils.cp312-win_amd64.pyd",
+            "lib.dylib",
+            "lib.dll",
+            "addon.node",
+            "app.pyz",
+            "pkg-1.0-py3-none-any.whl",
+            "pkg.egg",
+        ]:
+            with self.subTest(name=name):
+                self.assertTrue(self.flagged_compiled(name, b"\0" * 16))
 
     def test_a_renamed_binary_is_still_compiled_code(self):
-        """ctypes loads any path, so the name is only a hint. An extensionless
-        file is otherwise read as text, and a binary read as text matches no rule.
-        A text file that merely starts with "MZ" is not a PE image."""
+        """ctypes loads any path and `python helper` runs a .pyc by path, so the
+        name is only a hint. An extensionless file is otherwise read as text, and
+        a binary read as text matches no rule. Each header is asserted on its own."""
         pe = bytearray(64)
         pe[:2] = b"MZ"
         pe[60:64] = (64).to_bytes(4, "little")
-        binaries = {
-            "helper": b"\x7fELF" + bytes(60),
-            "tool": b"\xcf\xfa\xed\xfe" + bytes(60),
-            "run.txt": bytes(pe) + b"PE\0\0",
-            "libfoo.so.1": b"\0" * 8,
-            "addon.node": b"\0" * 8,
+        pyc = (3627).to_bytes(2, "little") + b"\r\n" + bytes(12)
+        headers = {
+            "elf": b"\x7fELF",
+            "macho-32-be": b"\xfe\xed\xfa\xce",
+            "macho-64-be": b"\xfe\xed\xfa\xcf",
+            "macho-32-le": b"\xce\xfa\xed\xfe",
+            "macho-64-le": b"\xcf\xfa\xed\xfe",
+            # Fat Mach-O, and also a Java .class: compiled either way.
+            "fat-or-class": b"\xca\xfe\xba\xbe",
+            "pe": bytes(pe) + b"PE\0\0",
+            "pyc": pyc,
         }
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "SKILL.md").write_text("# hi\n", encoding="utf-8")
-            (root / "NOTES").write_text(
-                "MZ was here, a note long enough to have sixty-four bytes in it.\n", encoding="utf-8"
-            )
-            for name, data in binaries.items():
-                (root / name).write_bytes(data)
-            report = scan.scan(root, RULES)
-        flagged = sorted(f["file"] for f in report["findings"] if f["id"] == "OBFUS-COMPILED-CODE")
-        self.assertEqual(flagged, sorted(binaries))
-        self.assertEqual(report["files_scanned"], 2)
+        for label, head in headers.items():
+            with self.subTest(header=label):
+                self.assertTrue(self.flagged_compiled("helper.txt", head + bytes(60)))
+
+    def test_a_zip_is_code_when_python_is_in_it(self):
+        """zipimport loads modules out of any zip on sys.path, whatever it is
+        called. A zip of XML, which is what a .docx is, is not a module."""
+
+        def archive(members: dict) -> bytes:
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w") as handle:
+                for member, body in members.items():
+                    handle.writestr(member, body)
+            return buffer.getvalue()
+
+        self.assertTrue(self.flagged_compiled("notes.txt", archive({"mod.py": "import os\n"})))
+        self.assertTrue(self.flagged_compiled("bundle", archive({"pkg/__init__.pyc": b"\0"})))
+        self.assertTrue(self.flagged_compiled("broken.dat", b"PK\x03\x04" + bytes(60)))
+        self.assertFalse(self.flagged_compiled("report.docx", archive({"word/document.xml": "<w:document/>"})))
+
+    def test_text_that_resembles_a_header_is_still_text(self):
+        """Two letters at the top of a note are not a PE image."""
+        self.assertFalse(
+            self.flagged_compiled("NOTES", b"MZ was here, a note long enough to have sixty-four bytes in it.\n")
+        )
+        self.assertFalse(self.flagged_compiled("notes.md", b"# hi\r\nplain text\r\n"))
 
     def test_an_unhashable_file_is_reported_not_dropped(self):
         """A file that cannot be hashed is not in the lock, so --check is blind

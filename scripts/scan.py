@@ -18,6 +18,7 @@ import json
 import os
 import re
 import sys
+import zipfile
 from pathlib import Path
 
 # The one place the version is written. The plugin manifests are checked
@@ -122,8 +123,13 @@ NATIVE_MAGIC = (
     b"\xfe\xed\xfa\xcf",
     b"\xce\xfa\xed\xfe",
     b"\xcf\xfa\xed\xfe",
-    b"\xca\xfe\xba\xbe",
+    b"\xca\xfe\xba\xbe",  # also a Java .class file, which is compiled code too
 )
+# Every CPython 3.x magic word so far sits in 3000-3700; the margin leaves room
+# for versions not yet released. Inside it the second byte is a control
+# character (0x0b-0x0f), so ordinary text does not land here by accident.
+PYC_MAGIC_RANGE = (2900, 4000)
+ZIP_CODE_SUFFIXES = (".py", ".pyc", ".pyo", ".pyd", ".so")
 MAX_BYTES = 2_000_000
 # No reviewable line is this long. A single regex call is bounded to this many
 # characters so a hostile skill cannot hand the engine a 50 KB line and stall
@@ -258,11 +264,26 @@ def is_compiled(path: Path) -> bool:
             head = handle.read(64)
             if head[:4] in NATIVE_MAGIC:
                 return True
+            # A .pyc opens with a two-byte little-endian magic word and "\r\n".
+            # `python helper` runs one by path, whatever it is called.
+            if head[2:4] == b"\r\n" and PYC_MAGIC_RANGE[0] <= int.from_bytes(head[:2], "little") < PYC_MAGIC_RANGE[1]:
+                return True
             if head[:2] == b"MZ" and len(head) == 64:
                 handle.seek(int.from_bytes(head[60:64], "little"))
-                return handle.read(4) == b"PE\0\0"
+                if handle.read(4) == b"PE\0\0":
+                    return True
     except (OSError, ValueError, OverflowError):
         return False
+    # A zip is only code when there is Python in it: zipimport loads modules
+    # straight out of one on sys.path, whatever the file is called. A .docx is
+    # a zip too, and one holding only XML is a document, not a module.
+    if head[:4] == b"PK\x03\x04":
+        try:
+            with zipfile.ZipFile(path) as archive:
+                return any(name.lower().endswith(ZIP_CODE_SUFFIXES) for name in archive.namelist())
+        except (OSError, zipfile.BadZipFile, ValueError, RuntimeError, EOFError):
+            # A file that says zip and will not open as one is not cleared by it.
+            return True
     return False
 
 

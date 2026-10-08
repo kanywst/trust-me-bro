@@ -1,4 +1,4 @@
-# trust-me-bro
+# <img src=".github/logo.png" alt="" width="52" align="absmiddle"> trust-me-bro
 
 [![ci](https://github.com/kanywst/trust-me-bro/actions/workflows/ci.yml/badge.svg)](https://github.com/kanywst/trust-me-bro/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/kanywst/trust-me-bro/badge)](https://scorecard.dev/viewer/?uri=github.com/kanywst/trust-me-bro)

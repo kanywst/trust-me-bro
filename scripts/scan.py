@@ -97,8 +97,17 @@ TEXT_SUFFIXES = {
 VENDOR_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "vendor", "target", "site-packages"}
 # Version control and caches. Skipped for the same reason and reported quietly,
 # because every checkout has them and they are not the skill's own code.
-META_DIRS = {".git", "__pycache__", ".mypy_cache", ".ruff_cache", ".pytest_cache", ".tox"}
+# `__pycache__` is not one of them, although it looks like a cache: Python
+# imports the bytecode in there in place of the source next to it whenever the
+# header matches, so a clean `utils.py` beside a poisoned `utils.cpython-312.pyc`
+# runs the poison. That directory is walked, and what it holds is reported below.
+META_DIRS = {".git", ".mypy_cache", ".ruff_cache", ".pytest_cache", ".tox"}
 SKIP_DIRS = VENDOR_DIRS | META_DIRS
+# Compiled Python. Executable, unreadable to every rule here, and preferred by
+# the interpreter over the source a reviewer would read, so it is not merely a
+# file no rule parses (SCAN-NOT-READ) but code that runs instead of the code
+# that was reviewed.
+BYTECODE_SUFFIXES = {".pyc", ".pyo"}
 MAX_BYTES = 2_000_000
 # No reviewable line is this long. A single regex call is bounded to this many
 # characters so a hostile skill cannot hand the engine a 50 KB line and stall
@@ -834,6 +843,7 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
     unread: list[str] = []
     dropped: list[str] = []
     notread: list[str] = []
+    bytecode: list[str] = []
     skipped: list[str] = []
     longline: list[str] = []
     links: list[dict] = []
@@ -857,6 +867,10 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
             dropped.append(rel)
             continue
         digests[rel] = digest
+
+        if path.suffix.lower() in BYTECODE_SUFFIXES:
+            bytecode.append(rel)
+            continue
 
         try:
             oversized = path.stat().st_size > MAX_BYTES
@@ -909,6 +923,8 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
         findings.append(synthetic(rules, "SCAN-FILE-DROPPED", file=rel))
     for rel in notread:
         findings.append(synthetic(rules, "SCAN-NOT-READ", file=rel))
+    for rel in bytecode:
+        findings.append(synthetic(rules, "OBFUS-PY-BYTECODE", file=rel))
     for rel in skipped:
         vendored = Path(rel).name in VENDOR_DIRS
         findings.append(synthetic(rules, "SCAN-VENDOR-SKIPPED" if vendored else "SCAN-DIR-SKIPPED", file=rel))
@@ -937,7 +953,7 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
         "files_hashed": len(digests),
         "files_unread": sorted(unread),
         "files_dropped": sorted(dropped),
-        "files_not_read": sorted(notread),
+        "files_not_read": sorted(notread + bytecode),
         "dirs_skipped": sorted(skipped),
         "symlinks": links,
         "findings": findings,

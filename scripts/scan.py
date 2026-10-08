@@ -283,8 +283,18 @@ def is_readable_text(path: Path) -> bool:
     return path.suffix.lower() in TEXT_SUFFIXES or name in MANIFEST_NAMES or not path.suffix
 
 
-def is_compiled(path: Path) -> bool:
-    return classify_binary(path) == "compiled"
+def starts_like_code(head: bytes) -> bool:
+    """A native header, a .pyc header, or a PE image whose header is in `head`."""
+    if head[:4] in NATIVE_MAGIC:
+        return True
+    # A .pyc opens with a two-byte little-endian magic word and "\r\n".
+    # `python helper` runs one by path, whatever it is called.
+    if head[2:4] == b"\r\n" and PYC_MAGIC_RANGE[0] <= int.from_bytes(head[:2], "little") < PYC_MAGIC_RANGE[1]:
+        return True
+    if head[:2] == b"MZ" and len(head) >= 64:
+        offset = int.from_bytes(head[60:64], "little")
+        return head[offset : offset + 4] == b"PE\0\0"
+    return False
 
 
 def classify_binary(path: Path) -> str | None:
@@ -299,12 +309,9 @@ def classify_binary(path: Path) -> str | None:
     try:
         with path.open("rb") as handle:
             head = handle.read(SNIFF_BYTES)
-            if head[:4] in NATIVE_MAGIC:
+            if starts_like_code(head):
                 return "compiled"
-            # A .pyc opens with a two-byte little-endian magic word and "\r\n".
-            # `python helper` runs one by path, whatever it is called.
-            if head[2:4] == b"\r\n" and PYC_MAGIC_RANGE[0] <= int.from_bytes(head[:2], "little") < PYC_MAGIC_RANGE[1]:
-                return "compiled"
+            # A PE header further in than the sniffed bytes.
             if head[:2] == b"MZ" and len(head) >= 64:
                 handle.seek(int.from_bytes(head[60:64], "little"))
                 if handle.read(4) == b"PE\0\0":
@@ -345,12 +352,14 @@ def classify_binary(path: Path) -> str | None:
                 if not (name.endswith(ZIP_DATA_SUFFIXES) or name in ZIP_DATA_NAMES):
                     return "compiled"
                 with archive.open(member) as handle:
-                    start = handle.read(4)
-                if start[:2] == b"#!" or start[:4] in NATIVE_MAGIC or start[:4] == b"PK\x03\x04":
+                    start = handle.read(1024)
+                if start[:2] == b"#!" or start[:4] == b"PK\x03\x04" or starts_like_code(start):
                     return "compiled"
-    except (OSError, zipfile.BadZipFile, ValueError, RuntimeError, EOFError, NotImplementedError):
+    except Exception:
         # A file that says zip and will not open as one -- or a member that will
-        # not, encrypted or in an unknown compression -- is not cleared by it.
+        # not: encrypted, an unknown compression, corrupt deflate data raising
+        # zlib.error -- is not cleared by it. Whatever the decompressor throws,
+        # the answer is the same, and a traceback would be no answer at all.
         return "compiled"
     return "archive"
 

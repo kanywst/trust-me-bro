@@ -521,9 +521,9 @@ class Coverage(unittest.TestCase):
         """zipimport loads modules out of any zip on sys.path, whatever it is
         called. A zip of XML, which is what a .docx is, is not a module."""
 
-        def archive(members: dict) -> bytes:
+        def archive(members: dict, compression: int = zipfile.ZIP_STORED) -> bytes:
             buffer = io.BytesIO()
-            with zipfile.ZipFile(buffer, "w") as handle:
+            with zipfile.ZipFile(buffer, "w", compression) as handle:
                 for member, body in members.items():
                     handle.writestr(member, body)
             return buffer.getvalue()
@@ -547,6 +547,18 @@ class Coverage(unittest.TestCase):
         # Named as data, starting like code.
         self.assertTrue(self.flagged_compiled("notes.dat", archive({"run.sh.txt": "#!/bin/sh\nid\n"})))
         self.assertTrue(self.flagged_compiled("pics.dat", archive({"a.png": b"\x7fELF" + bytes(8)})))
+        pe = bytearray(64)
+        pe[:2] = b"MZ"
+        pe[60:64] = (64).to_bytes(4, "little")
+        self.assertTrue(self.flagged_compiled("pe.dat", archive({"a.png": bytes(pe) + b"PE\0\0"})))
+        self.assertTrue(self.flagged_compiled("pyc.dat", archive({"a.png": (3627).to_bytes(2, "little") + b"\r\n"})))
+        # A member whose deflate stream is corrupt raises zlib.error, which is
+        # not an OSError. It must come back as a finding, not a traceback.
+        good = archive({"word/document.xml": "<w:document>" + "x" * 4000 + "</w:document>"}, zipfile.ZIP_DEFLATED)
+        broken = bytearray(good)
+        start = broken.index(b"word/document.xml") + len("word/document.xml")
+        broken[start + 10 : start + 40] = b"\xff" * 30
+        self.assertTrue(self.flagged_compiled("bad.dat", bytes(broken)))
         # Embedded fonts are document parts.
         fonts = {"word/document.xml": "<w:document/>", "word/fonts/a.ttf": b"\0\1\0\0GDEF"}
         self.assertFalse(self.flagged_compiled("fonts.docx", archive(fonts)))
@@ -636,7 +648,7 @@ class Coverage(unittest.TestCase):
             target.write_bytes(b"\0" * 16)
             for error in (PermissionError, ValueError, OverflowError):
                 with self.subTest(error=error.__name__), mock.patch.object(Path, "open", side_effect=error):
-                    self.assertTrue(scan.is_compiled(target))
+                    self.assertEqual(scan.classify_binary(target), "compiled")
 
     def test_an_unhashable_file_is_reported_not_dropped(self):
         """A file that cannot be hashed is not in the lock, so --check is blind

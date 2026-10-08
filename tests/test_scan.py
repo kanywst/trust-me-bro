@@ -544,6 +544,14 @@ class Coverage(unittest.TestCase):
         # A .docx with a macro project in it is not only document parts.
         macro = {"word/document.xml": "<w:document/>", "word/vbaProject.bin": b"\0"}
         self.assertTrue(self.flagged_compiled("report.docm", archive(macro)))
+        # Named as data, starting like code.
+        self.assertTrue(self.flagged_compiled("notes.dat", archive({"run.sh.txt": "#!/bin/sh\nid\n"})))
+        self.assertTrue(self.flagged_compiled("pics.dat", archive({"a.png": b"\x7fELF" + bytes(8)})))
+        # Embedded fonts are document parts.
+        fonts = {"word/document.xml": "<w:document/>", "word/fonts/a.ttf": b"\0\1\0\0GDEF"}
+        self.assertFalse(self.flagged_compiled("fonts.docx", archive(fonts)))
+        with mock.patch.object(scan, "MAX_ZIP_MEMBERS", 1):
+            self.assertTrue(self.flagged_compiled("many.docx", archive(fonts)))
         with mock.patch.object(scan, "MAX_ZIP_BYTES", 10):
             self.assertTrue(self.flagged_compiled("big.docx", archive({"word/document.xml": "<w:document/>"})))
         # A zip with no code in it is not code, but it is not text either.
@@ -564,9 +572,20 @@ class Coverage(unittest.TestCase):
             (root / "SKILL.md").write_text("# hi\n", encoding="utf-8")
             (root / "helper").write_bytes(b"\0" * 8 + b"\x7fELF" + bytes(60))
             report = scan.scan(root, RULES)
-        self.assertEqual(report["files_not_read"], ["helper"])
+        self.assertEqual(report["files_compiled"], ["helper"])
         self.assertEqual(report["files_scanned"], 1)
-        self.assertIn("SCAN-NOT-READ", rule_ids(report))
+        # Any other NUL-bearing file is at least named, not read as text.
+        self.assertFalse(self.flagged_compiled("blob", b"\1\2\0\3" * 16))
+
+    def test_a_script_with_a_native_binary_appended_is_compiled(self):
+        """`#!` and then a NUL: something will run it, and it is not text."""
+        self.assertTrue(self.flagged_compiled("helper", b"#!/bin/sh\nexit 0\n" + b"\x7fELF" + bytes(60)))
+
+    def test_a_binary_past_the_sniffed_bytes_is_read_as_text(self):
+        """The documented limit: only the first SNIFF_BYTES are looked at. This
+        pins it, so moving it is a decision rather than an accident."""
+        late = b"#!/bin/sh\n" + b"# padding\n" * (scan.SNIFF_BYTES // 10 + 1) + b"\x7fELF" + bytes(60)
+        self.assertFalse(self.flagged_compiled("helper", late))
 
     def test_a_script_with_a_zip_appended_is_read_as_both(self):
         """`#!` then a zip: the shell runs the text and Python runs the zip."""
@@ -594,6 +613,7 @@ class Coverage(unittest.TestCase):
             (root / "SKILL.md").write_bytes(body + buffer.getvalue())
             report = scan.scan(root, RULES)
         self.assertEqual(report["files_compiled"], ["SKILL.md"])
+        self.assertEqual(report["files_not_read"], [])
         self.assertIn("INJ-IGNORE-INSTRUCTIONS", rule_ids(report))
         self.assertEqual(report["files_scanned"], 1)
 

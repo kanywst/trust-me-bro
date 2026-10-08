@@ -149,7 +149,14 @@ PYC_MAGIC_RANGE = (2900, 4000)
 # A zip is code unless every member is one of these: the parts a .docx, .xlsx
 # or .odt is made of. Failing closed is the point. A zip of `run.sh` is not a
 # document, and a list of code suffixes would always be one suffix short.
-ZIP_DATA_SUFFIXES = (".xml", ".rels", ".json", ".txt", ".md", ".csv", ".png", ".jpg", ".jpeg", ".gif", ".emf", ".wmf")
+ZIP_DATA_SUFFIXES = (
+    *(".xml", ".rels", ".json", ".txt", ".md", ".csv"),
+    *(".png", ".jpg", ".jpeg", ".gif", ".emf", ".wmf", ".ttf", ".otf", ".odttf"),
+)
+# A name is a claim, so each member is opened too, and one that starts like
+# code is code whatever it is called. Past this many members the zip is not
+# walked, and not cleared.
+MAX_ZIP_MEMBERS = 2000
 ZIP_DATA_NAMES = {"mimetype"}
 # A file with a NUL byte this early is not text, whatever it is called.
 SNIFF_BYTES = 8192
@@ -308,7 +315,13 @@ def classify_binary(path: Path) -> str | None:
             # Not text either, if there is a NUL in it: an ELF behind a few
             # bytes of padding, an object file, a tarball. Read as text it would
             # match nothing and come back clean.
-            return "binary" if b"\0" in head else None
+            if b"\0" not in head:
+                return None
+            # A `#!` file with a NUL in it, or one carrying a native header
+            # past a few bytes of padding, is a binary something will run.
+            if head[:2] == b"#!" or any(magic in head for magic in NATIVE_MAGIC):
+                return "compiled"
+            return "binary"
         if path.stat().st_size > MAX_ZIP_BYTES:
             return "compiled"
     except (OSError, ValueError, OverflowError):
@@ -322,15 +335,24 @@ def classify_binary(path: Path) -> str | None:
     # rather than code, and nothing here has read inside that either.
     try:
         with zipfile.ZipFile(path) as archive:
-            names = archive.namelist()
-    except (OSError, zipfile.BadZipFile, ValueError, RuntimeError, EOFError):
-        # A file that says zip and will not open as one is not cleared by it.
+            members = archive.infolist()
+            if len(members) > MAX_ZIP_MEMBERS:
+                return "compiled"
+            for member in members:
+                name = member.filename.lower()
+                if member.is_dir():
+                    continue
+                if not (name.endswith(ZIP_DATA_SUFFIXES) or name in ZIP_DATA_NAMES):
+                    return "compiled"
+                with archive.open(member) as handle:
+                    start = handle.read(4)
+                if start[:2] == b"#!" or start[:4] in NATIVE_MAGIC or start[:4] == b"PK\x03\x04":
+                    return "compiled"
+    except (OSError, zipfile.BadZipFile, ValueError, RuntimeError, EOFError, NotImplementedError):
+        # A file that says zip and will not open as one -- or a member that will
+        # not, encrypted or in an unknown compression -- is not cleared by it.
         return "compiled"
-    data = all(
-        name.endswith("/") or name.lower().endswith(ZIP_DATA_SUFFIXES) or name.lower() in ZIP_DATA_NAMES
-        for name in names
-    )
-    return "archive" if data else "compiled"
+    return "archive"
 
 
 def has_shebang(path: Path) -> bool:
@@ -1041,6 +1063,9 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
         findings.append(synthetic(rules, "SCAN-TOO-LARGE", file=rel))
     for rel in dropped:
         findings.append(synthetic(rules, "SCAN-FILE-DROPPED", file=rel))
+    # One file, one place: a path recorded twice, or both compiled and not
+    # read, would be counted twice and reported twice.
+    notread[:] = [rel for rel in dict.fromkeys(notread) if rel not in compiled]
     for rel in notread:
         findings.append(synthetic(rules, "SCAN-NOT-READ", file=rel))
     for rel in compiled:

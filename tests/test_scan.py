@@ -10,6 +10,10 @@ from typing import ClassVar
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
+# Importing scan would otherwise leave scripts/__pycache__/scan.*.pyc behind,
+# and shipped bytecode is a finding: the self-scan below would then audit the
+# test run instead of the files a user installs.
+sys.dont_write_bytecode = True
 
 import scan  # noqa: E402
 
@@ -411,6 +415,42 @@ class Coverage(unittest.TestCase):
         self.assertEqual(report["files_not_read"], ["logo.png"])
         self.assertIn("logo.png", report["digests"])
         self.assertIn("SCAN-NOT-READ", rule_ids(report))
+
+    def test_shipped_bytecode_is_never_a_clean_scan(self):
+        """Python imports `__pycache__/utils.cpython-312.pyc` in place of the
+        `utils.py` beside it when the header matches, so the readable source is
+        not what runs. Trail of Bits' simple-formatter ships exactly that: a clean
+        `utils.py` and a `.pyc` that calls eval. Skipping `__pycache__` as a cache
+        directory brought it back LOOKS PLAIN at exit 0."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "SKILL.md").write_text("# hi\n", encoding="utf-8")
+            (root / "scripts" / "__pycache__").mkdir(parents=True)
+            (root / "scripts" / "utils.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+            (root / "scripts" / "__pycache__" / "utils.cpython-312.pyc").write_bytes(b"\xcb\x0d\x0d\x0a" + bytes(12))
+            report = scan.scan(root, RULES)
+        report["verdict"] = scan.decide(report)
+        pyc = "scripts/__pycache__/utils.cpython-312.pyc"
+        self.assertIn("OBFUS-PY-BYTECODE", rule_ids(report))
+        self.assertNotIn("SCAN-DIR-SKIPPED", rule_ids(report))
+        self.assertEqual(report["dirs_skipped"], [])
+        # Walked, so it is in the lock and --check sees the bytecode swapped.
+        self.assertIn(pyc, report["digests"])
+        self.assertEqual(report["files_not_read"], [pyc])
+        self.assertEqual(report["verdict"], "review")
+        self.assertNotEqual(scan.EXIT[report["verdict"]], 0)
+
+    def test_sourceless_bytecode_is_reported_as_bytecode(self):
+        """A lone `.pyc` with no `.py` is importable on its own. It is code, not
+        an opaque asset, so it is not left at SCAN-NOT-READ's low."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "SKILL.md").write_text("# hi\n", encoding="utf-8")
+            (root / "helper.PYC").write_bytes(b"\xcb\x0d\x0d\x0a" + bytes(12))
+            report = scan.scan(root, RULES)
+        self.assertEqual([f["file"] for f in report["findings"] if f["id"] == "OBFUS-PY-BYTECODE"], ["helper.PYC"])
+        self.assertNotIn("SCAN-NOT-READ", rule_ids(report))
+        self.assertEqual(scan.decide(report), "review")
 
     def test_an_unhashable_file_is_reported_not_dropped(self):
         """A file that cannot be hashed is not in the lock, so --check is blind

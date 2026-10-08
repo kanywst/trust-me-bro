@@ -98,6 +98,7 @@ python3 scripts/scan.py ./some-skill
 | `PERM-DANGEROUS-FLAG` | disables the agent's permission system |
 | `PERSIST-AGENT-CONFIG-WRITE` | writes to your agent's config or installs a hook |
 | `PERSIST-SHELL-PROFILE` | installs itself into your shell or a scheduler |
+| `OBFUS-PY-BYTECODE` | ships compiled Python bytecode, which runs instead of the source you read |
 | `HOOK-DECLARED` | declares a hook: a command that runs on the agent's own events |
 | `HOOK-POINTER-UNREAD` | points at a hook file that is not in what was scanned |
 | `MCP-SERVER-REMOTE` | declares a remote MCP server |
@@ -125,6 +126,8 @@ The lock covers every file the walk reaches, hashed from the bytes on disk, incl
 Some directories are not walked at all, so nothing in them is read, hashed or locked. Skipping them is a speed choice; being quiet about it would not be one, so each is named.
 
 A vendored or build directory — `node_modules`, `venv`, `dist`, `vendor` — is `SCAN-VENDOR-SKIPPED` at **high**, which puts the verdict at **REVIEW** and exit `1`. A skill has no reason to ship a dependency tree, and the one place nothing looked is the obvious place to put the thing you do not want read. Version-control and cache directories are `SCAN-DIR-SKIPPED` at low: every checkout has a `.git`, and a rule that fires on all of them is a rule nobody reads.
+
+`__pycache__` looks like a cache and is not treated as one. Python imports the bytecode in there instead of the `.py` next to it whenever the header matches, so a clean `utils.py` beside a poisoned `utils.cpython-312.pyc` runs the poison. The directory is walked and hashed, and every `.pyc` or `.pyo` anywhere in the skill is `OBFUS-PY-BYTECODE` at **high**: no rule here can read bytecode, and a skill has no reason to ship it.
 
 A file that was hashed but never parsed is `SCAN-NOT-READ`. `--check` still sees it change, but nothing has looked inside it.
 

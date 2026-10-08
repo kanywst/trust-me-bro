@@ -4,7 +4,13 @@ Notable changes, newest first. This project follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `OBFUS-PY-BYTECODE` at `high`, for every `.pyc` or `.pyo` in the skill. Python imports a matching `__pycache__/*.pyc` in place of the `.py` beside it, and imports a lone `.pyc` with no source at all, so the source a reviewer reads is not necessarily what runs. Trail of Bits' [`simple-formatter`](https://github.com/trailofbits/overtly-malicious-skills) ships a clean `utils.py` next to a `.pyc` that calls `eval`, and 0.2.0 reported it `LOOKS PLAIN` at exit `0`.
+
+### Changed
+
+- `__pycache__` is no longer skipped as a cache directory. It is walked and hashed, so `--check` sees bytecode swapped after approval, and what it holds is reported by the rule above instead of as `SCAN-DIR-SKIPPED` at `low`.
 
 ## [0.2.0] - 2026-09-16
 

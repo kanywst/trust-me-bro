@@ -108,8 +108,22 @@ SKIP_DIRS = VENDOR_DIRS | META_DIRS
 # over the .py beside it, and an extension module (.so, .pyd) is tried before
 # the .py of the same name. So it is not merely a file no rule parses
 # (SCAN-NOT-READ) but code that runs instead of the code that was reviewed.
-# .dylib and .dll are here because ctypes loads them just as directly.
-COMPILED_SUFFIXES = {".pyc", ".pyo", ".pyd", ".so", ".dylib", ".dll"}
+# .dylib and .dll are here because ctypes loads them just as directly, .node
+# because Node's require() does, and .pyz/.whl/.egg because Python imports
+# straight out of the archive. A name is only a hint, though: ctypes loads any
+# path, so a binary is also recognised by its first bytes (see is_compiled).
+COMPILED_SUFFIXES = {".pyc", ".pyo", ".pyd", ".so", ".dylib", ".dll", ".node", ".pyz", ".whl", ".egg"}
+VERSIONED_SO = re.compile(r"\.so(\.\d+)+$", re.IGNORECASE)
+# ELF, and Mach-O in both widths and byte orders plus the fat (universal) form.
+# PE is checked separately: "MZ" alone is two letters a text file can start with.
+NATIVE_MAGIC = (
+    b"\x7fELF",
+    b"\xfe\xed\xfa\xce",
+    b"\xfe\xed\xfa\xcf",
+    b"\xce\xfa\xed\xfe",
+    b"\xcf\xfa\xed\xfe",
+    b"\xca\xfe\xba\xbe",
+)
 MAX_BYTES = 2_000_000
 # No reviewable line is this long. A single regex call is bounded to this many
 # characters so a hostile skill cannot hand the engine a 50 KB line and stall
@@ -228,6 +242,28 @@ def link_record(root: Path, path: Path) -> dict:
 def is_readable_text(path: Path) -> bool:
     name = path.name.lower()
     return path.suffix.lower() in TEXT_SUFFIXES or name in MANIFEST_NAMES or not path.suffix
+
+
+def is_compiled(path: Path) -> bool:
+    """Compiled code, by name or by content.
+
+    The content check is what keeps a rename from working: `helper` with no
+    extension is otherwise read as text, decoded with replacement characters,
+    matched against nothing, and reported as clean.
+    """
+    if path.suffix.lower() in COMPILED_SUFFIXES or VERSIONED_SO.search(path.name):
+        return True
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(64)
+            if head[:4] in NATIVE_MAGIC:
+                return True
+            if head[:2] == b"MZ" and len(head) == 64:
+                handle.seek(int.from_bytes(head[60:64], "little"))
+                return handle.read(4) == b"PE\0\0"
+    except (OSError, ValueError, OverflowError):
+        return False
+    return False
 
 
 def read_text(path: Path) -> str | None:
@@ -870,7 +906,7 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
             continue
         digests[rel] = digest
 
-        if path.suffix.lower() in COMPILED_SUFFIXES:
+        if is_compiled(path):
             compiled.append(rel)
             continue
 

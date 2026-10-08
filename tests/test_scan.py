@@ -475,6 +475,33 @@ class Coverage(unittest.TestCase):
         self.assertNotIn("SCAN-NOT-READ", rule_ids(report))
         self.assertEqual(scan.decide(report), "review")
 
+    def test_a_renamed_binary_is_still_compiled_code(self):
+        """ctypes loads any path, so the name is only a hint. An extensionless
+        file is otherwise read as text, and a binary read as text matches no rule.
+        A text file that merely starts with "MZ" is not a PE image."""
+        pe = bytearray(64)
+        pe[:2] = b"MZ"
+        pe[60:64] = (64).to_bytes(4, "little")
+        binaries = {
+            "helper": b"\x7fELF" + bytes(60),
+            "tool": b"\xcf\xfa\xed\xfe" + bytes(60),
+            "run.txt": bytes(pe) + b"PE\0\0",
+            "libfoo.so.1": b"\0" * 8,
+            "addon.node": b"\0" * 8,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "SKILL.md").write_text("# hi\n", encoding="utf-8")
+            (root / "NOTES").write_text(
+                "MZ was here, a note long enough to have sixty-four bytes in it.\n", encoding="utf-8"
+            )
+            for name, data in binaries.items():
+                (root / name).write_bytes(data)
+            report = scan.scan(root, RULES)
+        flagged = sorted(f["file"] for f in report["findings"] if f["id"] == "OBFUS-COMPILED-CODE")
+        self.assertEqual(flagged, sorted(binaries))
+        self.assertEqual(report["files_scanned"], 2)
+
     def test_an_unhashable_file_is_reported_not_dropped(self):
         """A file that cannot be hashed is not in the lock, so --check is blind
         to it. Dropping it from the tally as well would leave it in the skill

@@ -4,6 +4,12 @@ Notable changes, newest first. This project follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.0] - 2026-10-08
+
+Code that runs is no longer allowed to be code nobody read. Run against Trail of Bits' [overtly-malicious-skills](https://github.com/trailofbits/overtly-malicious-skills), a set built to get past skill scanners, 0.2.0 returned exit `0` on all four. Two of them — poisoned bytecode beside clean source, and a script smuggled inside a `.docx` — now come back `REVIEW`, exit `1`.
+
 ### Added
 
 - `OBFUS-COMPILED-CODE` at `high`, for compiled code anywhere the walk reaches, recognised by name (`.pyc` `.pyo` `.pyd` `.so` `.so.N` `.dylib` `.dll` `.node` `.pyz` `.whl` `.egg` `.jar` `.class` `.wasm`) and by content: an ELF, Mach-O, PE, WebAssembly or `.pyc` header, or a zip (found by its trailer, so a zipapp's `#!` line does not hide it) unless it holds only document parts, which is `SCAN-NOT-READ`, so renaming one of those does not turn it back into text. `--json` lists them under a new `files_compiled` key. Any other file with a NUL byte in its first 8 KiB is no longer read as text and is `SCAN-NOT-READ`. Python imports a matching `__pycache__/*.pyc` in place of the `.py` beside it, imports a lone `.pyc` with no source at all, and tries an extension module before a `.py` of the same name, so the source a reviewer reads is not necessarily what runs. Trail of Bits' [`simple-formatter`](https://github.com/trailofbits/overtly-malicious-skills) ships a clean `utils.py` next to a `.pyc` that calls `eval`, and 0.2.0 reported it `LOOKS PLAIN` at exit `0`. Its `context-loader`, which hides a `.docx` zip holding a script as `.instructions.docx.txt`, is caught by the same rule.
@@ -54,6 +60,7 @@ First release. A pre-install audit for agent skills, plugins, and MCP servers: o
 - Every place the scan does not reach is named. A vendored or build directory is `SCAN-VENDOR-SKIPPED` at `high`, so a skill hiding code in `node_modules` cannot come back clean at exit `0`; a version-control or cache directory is `SCAN-DIR-SKIPPED` at `low`; a file hashed but never parsed is `SCAN-NOT-READ`.
 - A file the scanner cannot open at all is reported as `SCAN-FILE-DROPPED` rather than skipped. It is absent from the lock, so `--check` cannot see it change; being absent from the tally as well would leave it in the skill and in no count at all.
 
-[Unreleased]: https://github.com/kanywst/trust-me-bro/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kanywst/trust-me-bro/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/kanywst/trust-me-bro/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/kanywst/trust-me-bro/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kanywst/trust-me-bro/releases/tag/v0.1.0

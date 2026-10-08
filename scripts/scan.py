@@ -23,7 +23,7 @@ from pathlib import Path
 
 # The one place the version is written. The plugin manifests are checked
 # against it in CI, so a release cannot ship three numbers that disagree.
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 RULES_PATH = Path(__file__).resolve().parent.parent / "rules" / "rules.json"
 LOCK_NAME = ".trustmebro.lock"

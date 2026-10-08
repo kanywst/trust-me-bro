@@ -4,7 +4,9 @@ Notable changes, newest first. This project follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- A listing icon at `.claude-plugin/icon.png` for the Claude plugin directory.
 
 ## [0.3.0] - 2026-10-08
 

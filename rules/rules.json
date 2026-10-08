@@ -314,8 +314,8 @@
       "id": "OBFUS-COMPILED-CODE",
       "severity": "high",
       "pattern": null,
-      "title": "ships compiled code that no rule can read",
-      "why": "Python runs a matching .pyc in __pycache__ instead of the .py beside it, runs a lone .pyc with no source at all, and imports an extension module (.so, .pyd) ahead of a .py of the same name. So the source you can read is not necessarily what executes, and no rule here can read compiled code. A skill has no reason to ship it: delete bytecode and let Python rebuild it from the source, or ask why a binary is here."
+      "title": "ships compiled or packed code that no rule can read",
+      "why": "Python runs a matching .pyc in __pycache__ instead of the .py beside it, runs a lone .pyc with no source at all, and imports an extension module (.so, .pyd) ahead of a .py of the same name, and a zip can carry any of that or a script, under any name. So the source you can read is not necessarily what executes, and no rule here can read compiled code. A skill has no reason to ship it: delete bytecode and let Python rebuild it from the source, or ask why a binary is here."
     },
     {
       "id": "SCAN-NOT-READ",

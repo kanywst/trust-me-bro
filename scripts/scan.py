@@ -110,10 +110,25 @@ SKIP_DIRS = VENDOR_DIRS | META_DIRS
 # the .py of the same name. So it is not merely a file no rule parses
 # (SCAN-NOT-READ) but code that runs instead of the code that was reviewed.
 # .dylib and .dll are here because ctypes loads them just as directly, .node
-# because Node's require() does, and .pyz/.whl/.egg because Python imports
-# straight out of the archive. A name is only a hint, though: ctypes loads any
+# because Node's require() does, .pyz/.whl/.egg because Python imports
+# straight out of the archive, and .jar/.class/.wasm because they are the
+# other compiled forms a skill's script can hand to a runtime. A name is only a hint, though: ctypes loads any
 # path, so a binary is also recognised by its first bytes (see is_compiled).
-COMPILED_SUFFIXES = {".pyc", ".pyo", ".pyd", ".so", ".dylib", ".dll", ".node", ".pyz", ".whl", ".egg"}
+COMPILED_SUFFIXES = {
+    ".pyc",
+    ".pyo",
+    ".pyd",
+    ".so",
+    ".dylib",
+    ".dll",
+    ".node",
+    ".pyz",
+    ".whl",
+    ".egg",
+    ".jar",
+    ".class",
+    ".wasm",
+}
 VERSIONED_SO = re.compile(r"\.so(\.\d+)+$", re.IGNORECASE)
 # ELF, and Mach-O in both widths and byte orders plus the fat (universal) form.
 # PE is checked separately: "MZ" alone is two letters a text file can start with.
@@ -124,12 +139,13 @@ NATIVE_MAGIC = (
     b"\xce\xfa\xed\xfe",
     b"\xcf\xfa\xed\xfe",
     b"\xca\xfe\xba\xbe",  # also a Java .class file, which is compiled code too
+    b"\0asm",  # WebAssembly
 )
 # Every CPython 3.x magic word so far sits in 3000-3700; the margin leaves room
 # for versions not yet released. Inside it the second byte is a control
 # character (0x0b-0x0f), so ordinary text does not land here by accident.
 PYC_MAGIC_RANGE = (2900, 4000)
-ZIP_CODE_SUFFIXES = (".py", ".pyc", ".pyo", ".pyd", ".so")
+ZIP_CODE_SUFFIXES = (".py", ".pyc", ".pyo", ".pyd", ".so", ".class")
 MAX_BYTES = 2_000_000
 # No reviewable line is this long. A single regex call is bounded to this many
 # characters so a hostile skill cannot hand the engine a 50 KB line and stall
@@ -272,12 +288,22 @@ def is_compiled(path: Path) -> bool:
                 handle.seek(int.from_bytes(head[60:64], "little"))
                 if handle.read(4) == b"PE\0\0":
                     return True
-    except (OSError, ValueError, OverflowError):
+    except (ValueError, OverflowError):
         return False
-    # A zip is only code when there is Python in it: zipimport loads modules
-    # straight out of one on sys.path, whatever the file is called. A .docx is
-    # a zip too, and one holding only XML is a document, not a module.
-    if head[:4] == b"PK\x03\x04":
+    except OSError:
+        # It was hashed a moment ago, so it exists. A header that cannot be read
+        # cannot be shown not to be code, and SCAN-NOT-READ's low is not the
+        # place for that.
+        return True
+    # A zip is only code when there is code in it: zipimport loads modules out
+    # of one on sys.path, whatever the file is called. A .docx is a zip too, and
+    # one holding only XML is a document. Found by its tail rather than its
+    # head, because a zipapp starts with a `#!` line and runs as `python file`.
+    try:
+        looks_zipped = head[:4] == b"PK\x03\x04" or zipfile.is_zipfile(path)
+    except OSError:
+        return True
+    if looks_zipped:
         try:
             with zipfile.ZipFile(path) as archive:
                 return any(name.lower().endswith(ZIP_CODE_SUFFIXES) for name in archive.namelist())
@@ -1012,7 +1038,8 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
         "files_hashed": len(digests),
         "files_unread": sorted(unread),
         "files_dropped": sorted(dropped),
-        "files_not_read": sorted(notread + compiled),
+        "files_not_read": sorted(notread),
+        "files_compiled": sorted(compiled),
         "dirs_skipped": sorted(skipped),
         "symlinks": links,
         "findings": findings,

@@ -9,6 +9,7 @@ import unittest
 import zipfile
 from pathlib import Path
 from typing import ClassVar
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -438,7 +439,8 @@ class Coverage(unittest.TestCase):
         self.assertEqual(report["dirs_skipped"], [])
         # Walked, so it is in the lock and --check sees the bytecode swapped.
         self.assertIn(pyc, report["digests"])
-        self.assertEqual(report["files_not_read"], [pyc])
+        self.assertEqual(report["files_compiled"], [pyc])
+        self.assertEqual(report["files_not_read"], [])
         self.assertEqual(report["verdict"], "review")
         self.assertNotEqual(scan.EXIT[report["verdict"]], 0)
 
@@ -484,6 +486,9 @@ class Coverage(unittest.TestCase):
             "app.pyz",
             "pkg-1.0-py3-none-any.whl",
             "pkg.egg",
+            "app.jar",
+            "Main.class",
+            "mod.wasm",
         ]:
             with self.subTest(name=name):
                 self.assertTrue(self.flagged_compiled(name, b"\0" * 16))
@@ -506,6 +511,7 @@ class Coverage(unittest.TestCase):
             "fat-or-class": b"\xca\xfe\xba\xbe",
             "pe": bytes(pe) + b"PE\0\0",
             "pyc": pyc,
+            "wasm": b"\0asm\x01\0\0\0",
         }
         for label, head in headers.items():
             with self.subTest(header=label):
@@ -524,6 +530,12 @@ class Coverage(unittest.TestCase):
 
         self.assertTrue(self.flagged_compiled("notes.txt", archive({"mod.py": "import os\n"})))
         self.assertTrue(self.flagged_compiled("bundle", archive({"pkg/__init__.pyc": b"\0"})))
+        self.assertTrue(self.flagged_compiled("lib.bin", archive({"com/x/Main.class": b"\xca\xfe\xba\xbe"})))
+        # A zipapp: an interpreter line in front, so the file does not start PK.
+        self.assertTrue(
+            self.flagged_compiled("helper", b"#!/usr/bin/env python3\n" + archive({"__main__.py": "x=1\n"}))
+        )
+        # Says zip and will not open as one: not cleared by it.
         self.assertTrue(self.flagged_compiled("broken.dat", b"PK\x03\x04" + bytes(60)))
         self.assertFalse(self.flagged_compiled("report.docx", archive({"word/document.xml": "<w:document/>"})))
 
@@ -533,6 +545,19 @@ class Coverage(unittest.TestCase):
             self.flagged_compiled("NOTES", b"MZ was here, a note long enough to have sixty-four bytes in it.\n")
         )
         self.assertFalse(self.flagged_compiled("notes.md", b"# hi\r\nplain text\r\n"))
+        # "MZ" with an e_lfanew pointing past the end of the file is not PE.
+        bogus = bytearray(b"MZ" + bytes(62))
+        bogus[60:64] = (1 << 30).to_bytes(4, "little")
+        self.assertFalse(self.flagged_compiled("odd.txt", bytes(bogus)))
+
+    def test_a_header_that_cannot_be_read_is_not_cleared(self):
+        """It was hashed, so it exists. Not being able to look at the first
+        bytes is not evidence that they are text."""
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "helper"
+            target.write_bytes(b"\0" * 16)
+            with mock.patch.object(Path, "open", side_effect=PermissionError):
+                self.assertTrue(scan.is_compiled(target))
 
     def test_an_unhashable_file_is_reported_not_dropped(self):
         """A file that cannot be hashed is not in the lock, so --check is blind

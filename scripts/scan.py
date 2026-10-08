@@ -145,7 +145,12 @@ NATIVE_MAGIC = (
 # for versions not yet released. Inside it the second byte is a control
 # character (0x0b-0x0f), so ordinary text does not land here by accident.
 PYC_MAGIC_RANGE = (2900, 4000)
-ZIP_CODE_SUFFIXES = (".py", ".pyc", ".pyo", ".pyd", ".so", ".class")
+# A zip member with one of these names makes the zip code. Anything else in a
+# zip is still something no rule read, and is reported as such.
+ZIP_CODE_SUFFIXES = (".py", *sorted(COMPILED_SUFFIXES))
+# zipfile reads the whole central directory on open. A zip big enough for that
+# to be expensive is not opened at all, and is not cleared either.
+MAX_ZIP_BYTES = 64_000_000
 MAX_BYTES = 2_000_000
 # No reviewable line is this long. A single regex call is bounded to this many
 # characters so a hostile skill cannot hand the engine a 50 KB line and stall
@@ -267,50 +272,54 @@ def is_readable_text(path: Path) -> bool:
 
 
 def is_compiled(path: Path) -> bool:
-    """Compiled code, by name or by content.
+    return classify_binary(path) == "compiled"
+
+
+def classify_binary(path: Path) -> str | None:
+    """ "compiled", "archive" or None: what a file is, by name or by content.
 
     The content check is what keeps a rename from working: `helper` with no
     extension is otherwise read as text, decoded with replacement characters,
     matched against nothing, and reported as clean.
     """
     if path.suffix.lower() in COMPILED_SUFFIXES or VERSIONED_SO.search(path.name):
-        return True
+        return "compiled"
     try:
         with path.open("rb") as handle:
             head = handle.read(64)
             if head[:4] in NATIVE_MAGIC:
-                return True
+                return "compiled"
             # A .pyc opens with a two-byte little-endian magic word and "\r\n".
             # `python helper` runs one by path, whatever it is called.
             if head[2:4] == b"\r\n" and PYC_MAGIC_RANGE[0] <= int.from_bytes(head[:2], "little") < PYC_MAGIC_RANGE[1]:
-                return True
+                return "compiled"
             if head[:2] == b"MZ" and len(head) == 64:
                 handle.seek(int.from_bytes(head[60:64], "little"))
                 if handle.read(4) == b"PE\0\0":
-                    return True
+                    return "compiled"
+        # Found by its tail rather than its head, because a zipapp starts with a
+        # `#!` line and runs as `python file`.
+        if not (head[:4] == b"PK\x03\x04" or zipfile.is_zipfile(path)):
+            return None
+        if path.stat().st_size > MAX_ZIP_BYTES:
+            return "compiled"
     except (ValueError, OverflowError):
-        return False
+        return None
     except OSError:
         # It was hashed a moment ago, so it exists. A header that cannot be read
         # cannot be shown not to be code, and SCAN-NOT-READ's low is not the
         # place for that.
-        return True
-    # A zip is only code when there is code in it: zipimport loads modules out
-    # of one on sys.path, whatever the file is called. A .docx is a zip too, and
-    # one holding only XML is a document. Found by its tail rather than its
-    # head, because a zipapp starts with a `#!` line and runs as `python file`.
+        return "compiled"
+    # A zip is code when there is code in it: zipimport loads modules out of one
+    # on sys.path, whatever the file is called. Otherwise it is an archive --
+    # a .docx is one -- and nothing here has read what is inside.
     try:
-        looks_zipped = head[:4] == b"PK\x03\x04" or zipfile.is_zipfile(path)
-    except OSError:
-        return True
-    if looks_zipped:
-        try:
-            with zipfile.ZipFile(path) as archive:
-                return any(name.lower().endswith(ZIP_CODE_SUFFIXES) for name in archive.namelist())
-        except (OSError, zipfile.BadZipFile, ValueError, RuntimeError, EOFError):
-            # A file that says zip and will not open as one is not cleared by it.
-            return True
-    return False
+        with zipfile.ZipFile(path) as archive:
+            names = archive.namelist()
+    except (OSError, zipfile.BadZipFile, ValueError, RuntimeError, EOFError):
+        # A file that says zip and will not open as one is not cleared by it.
+        return "compiled"
+    return "compiled" if any(name.lower().endswith(ZIP_CODE_SUFFIXES) for name in names) else "archive"
 
 
 def read_text(path: Path) -> str | None:
@@ -953,9 +962,14 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
             continue
         digests[rel] = digest
 
-        if is_compiled(path):
-            compiled.append(rel)
-            continue
+        # A file can be both: a SKILL.md with a zip appended is still a SKILL.md,
+        # and its text is scanned too. One with no text name is not, because
+        # reading a binary as text only produces noise.
+        kind = classify_binary(path)
+        if kind is not None:
+            (compiled if kind == "compiled" else notread).append(rel)
+            if not (path.suffix.lower() in TEXT_SUFFIXES or path.name.lower() in MANIFEST_NAMES):
+                continue
 
         try:
             oversized = path.stat().st_size > MAX_BYTES

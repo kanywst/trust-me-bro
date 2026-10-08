@@ -112,8 +112,9 @@ SKIP_DIRS = VENDOR_DIRS | META_DIRS
 # .dylib and .dll are here because ctypes loads them just as directly, .node
 # because Node's require() does, .pyz/.whl/.egg because Python imports
 # straight out of the archive, and .jar/.class/.wasm because they are the
-# other compiled forms a skill's script can hand to a runtime. A name is only a hint, though: ctypes loads any
-# path, so a binary is also recognised by its first bytes (see is_compiled).
+# other compiled forms a skill's script can hand to a runtime. A name is only a
+# hint, though: ctypes loads any path, so a binary is also recognised by its
+# first bytes (see classify_binary).
 COMPILED_SUFFIXES = {
     ".pyc",
     ".pyo",
@@ -145,9 +146,13 @@ NATIVE_MAGIC = (
 # for versions not yet released. Inside it the second byte is a control
 # character (0x0b-0x0f), so ordinary text does not land here by accident.
 PYC_MAGIC_RANGE = (2900, 4000)
-# A zip member with one of these names makes the zip code. Anything else in a
-# zip is still something no rule read, and is reported as such.
-ZIP_CODE_SUFFIXES = (".py", *sorted(COMPILED_SUFFIXES))
+# A zip is code unless every member is one of these: the parts a .docx, .xlsx
+# or .odt is made of. Failing closed is the point. A zip of `run.sh` is not a
+# document, and a list of code suffixes would always be one suffix short.
+ZIP_DATA_SUFFIXES = (".xml", ".rels", ".json", ".txt", ".md", ".csv", ".png", ".jpg", ".jpeg", ".gif", ".emf", ".wmf")
+ZIP_DATA_NAMES = {"mimetype"}
+# A file with a NUL byte this early is not text, whatever it is called.
+SNIFF_BYTES = 8192
 # zipfile reads the whole central directory on open. A zip big enough for that
 # to be expensive is not opened at all, and is not cleared either.
 MAX_ZIP_BYTES = 64_000_000
@@ -276,7 +281,7 @@ def is_compiled(path: Path) -> bool:
 
 
 def classify_binary(path: Path) -> str | None:
-    """ "compiled", "archive" or None: what a file is, by name or by content.
+    """What a file is, by name or by content: "compiled", "archive", "binary", or None for text.
 
     The content check is what keeps a rename from working: `helper` with no
     extension is otherwise read as text, decoded with replacement characters,
@@ -286,40 +291,54 @@ def classify_binary(path: Path) -> str | None:
         return "compiled"
     try:
         with path.open("rb") as handle:
-            head = handle.read(64)
+            head = handle.read(SNIFF_BYTES)
             if head[:4] in NATIVE_MAGIC:
                 return "compiled"
             # A .pyc opens with a two-byte little-endian magic word and "\r\n".
             # `python helper` runs one by path, whatever it is called.
             if head[2:4] == b"\r\n" and PYC_MAGIC_RANGE[0] <= int.from_bytes(head[:2], "little") < PYC_MAGIC_RANGE[1]:
                 return "compiled"
-            if head[:2] == b"MZ" and len(head) == 64:
+            if head[:2] == b"MZ" and len(head) >= 64:
                 handle.seek(int.from_bytes(head[60:64], "little"))
                 if handle.read(4) == b"PE\0\0":
                     return "compiled"
         # Found by its tail rather than its head, because a zipapp starts with a
         # `#!` line and runs as `python file`.
         if not (head[:4] == b"PK\x03\x04" or zipfile.is_zipfile(path)):
-            return None
+            # Not text either, if there is a NUL in it: an ELF behind a few
+            # bytes of padding, an object file, a tarball. Read as text it would
+            # match nothing and come back clean.
+            return "binary" if b"\0" in head else None
         if path.stat().st_size > MAX_ZIP_BYTES:
             return "compiled"
-    except (ValueError, OverflowError):
-        return None
-    except OSError:
+    except (OSError, ValueError, OverflowError):
         # It was hashed a moment ago, so it exists. A header that cannot be read
         # cannot be shown not to be code, and SCAN-NOT-READ's low is not the
         # place for that.
         return "compiled"
-    # A zip is code when there is code in it: zipimport loads modules out of one
-    # on sys.path, whatever the file is called. Otherwise it is an archive --
-    # a .docx is one -- and nothing here has read what is inside.
+    # zipimport loads modules out of a zip on sys.path whatever it is called,
+    # and a skill's script can unpack one and run what is inside. Only a zip
+    # made entirely of document parts -- a .docx without macros -- is an archive
+    # rather than code, and nothing here has read inside that either.
     try:
         with zipfile.ZipFile(path) as archive:
             names = archive.namelist()
     except (OSError, zipfile.BadZipFile, ValueError, RuntimeError, EOFError):
         # A file that says zip and will not open as one is not cleared by it.
         return "compiled"
-    return "compiled" if any(name.lower().endswith(ZIP_CODE_SUFFIXES) for name in names) else "archive"
+    data = all(
+        name.endswith("/") or name.lower().endswith(ZIP_DATA_SUFFIXES) or name.lower() in ZIP_DATA_NAMES
+        for name in names
+    )
+    return "archive" if data else "compiled"
+
+
+def has_shebang(path: Path) -> bool:
+    try:
+        with path.open("rb") as handle:
+            return handle.read(2) == b"#!"
+    except OSError:
+        return False
 
 
 def read_text(path: Path) -> str | None:
@@ -962,13 +981,15 @@ def scan(root: Path, rules: dict, named_link: str | None = None) -> dict:
             continue
         digests[rel] = digest
 
-        # A file can be both: a SKILL.md with a zip appended is still a SKILL.md,
-        # and its text is scanned too. One with no text name is not, because
-        # reading a binary as text only produces noise.
+        # A file can be both: a SKILL.md or a `#!` script with a zip appended is
+        # still that, and its text is scanned too -- the agent reads the one
+        # and the shell runs the other. Anything else that is not text is not
+        # read as text, because that only produces noise or, worse, nothing.
         kind = classify_binary(path)
         if kind is not None:
             (compiled if kind == "compiled" else notread).append(rel)
-            if not (path.suffix.lower() in TEXT_SUFFIXES or path.name.lower() in MANIFEST_NAMES):
+            textual = path.suffix.lower() in TEXT_SUFFIXES or path.name.lower() in MANIFEST_NAMES
+            if not (textual or has_shebang(path)):
                 continue
 
         try:

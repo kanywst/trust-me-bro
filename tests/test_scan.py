@@ -430,7 +430,7 @@ class Coverage(unittest.TestCase):
             (root / "scripts" / "__pycache__" / "utils.cpython-312.pyc").write_bytes(b"\xcb\x0d\x0d\x0a" + bytes(12))
             report = scan.scan(root, RULES)
         report["verdict"] = scan.decide(report)
-        pyc = "scripts/__pycache__/utils.cpython-312.pyc"
+        pyc = str(Path("scripts", "__pycache__", "utils.cpython-312.pyc"))
         self.assertIn("OBFUS-PY-BYTECODE", rule_ids(report))
         self.assertNotIn("SCAN-DIR-SKIPPED", rule_ids(report))
         self.assertEqual(report["dirs_skipped"], [])

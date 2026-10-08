@@ -431,7 +431,7 @@ class Coverage(unittest.TestCase):
             report = scan.scan(root, RULES)
         report["verdict"] = scan.decide(report)
         pyc = str(Path("scripts", "__pycache__", "utils.cpython-312.pyc"))
-        self.assertIn("OBFUS-PY-BYTECODE", rule_ids(report))
+        self.assertIn("OBFUS-COMPILED-CODE", rule_ids(report))
         self.assertNotIn("SCAN-DIR-SKIPPED", rule_ids(report))
         self.assertEqual(report["dirs_skipped"], [])
         # Walked, so it is in the lock and --check sees the bytecode swapped.
@@ -448,7 +448,30 @@ class Coverage(unittest.TestCase):
             (root / "SKILL.md").write_text("# hi\n", encoding="utf-8")
             (root / "helper.PYC").write_bytes(b"\xcb\x0d\x0d\x0a" + bytes(12))
             report = scan.scan(root, RULES)
-        self.assertEqual([f["file"] for f in report["findings"] if f["id"] == "OBFUS-PY-BYTECODE"], ["helper.PYC"])
+        self.assertEqual([f["file"] for f in report["findings"] if f["id"] == "OBFUS-COMPILED-CODE"], ["helper.PYC"])
+        self.assertNotIn("SCAN-NOT-READ", rule_ids(report))
+        self.assertEqual(scan.decide(report), "review")
+
+    def test_every_compiled_form_python_will_run_is_reported(self):
+        """An extension module is tried before the .py of the same name, so it is
+        the same swap as a .pyc from the other side. Each suffix is asserted on
+        its own: a set that silently lost one would still pass a test of the rest."""
+        names = [
+            "old.pyo",
+            "utils.cpython-312-x86_64-linux-gnu.so",
+            "utils.cp312-win_amd64.pyd",
+            "lib.dylib",
+            "lib.dll",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "SKILL.md").write_text("# hi\n", encoding="utf-8")
+            (root / "utils.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+            for name in names:
+                (root / name).write_bytes(b"\x7fELF" + bytes(12))
+            report = scan.scan(root, RULES)
+        flagged = sorted(f["file"] for f in report["findings"] if f["id"] == "OBFUS-COMPILED-CODE")
+        self.assertEqual(flagged, sorted(names))
         self.assertNotIn("SCAN-NOT-READ", rule_ids(report))
         self.assertEqual(scan.decide(report), "review")
 

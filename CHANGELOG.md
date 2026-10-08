@@ -6,7 +6,7 @@ Notable changes, newest first. This project follows [Keep a Changelog](https://k
 
 ### Added
 
-- `OBFUS-PY-BYTECODE` at `high`, for every `.pyc` or `.pyo` in the skill. Python imports a matching `__pycache__/*.pyc` in place of the `.py` beside it, and imports a lone `.pyc` with no source at all, so the source a reviewer reads is not necessarily what runs. Trail of Bits' [`simple-formatter`](https://github.com/trailofbits/overtly-malicious-skills) ships a clean `utils.py` next to a `.pyc` that calls `eval`, and 0.2.0 reported it `LOOKS PLAIN` at exit `0`.
+- `OBFUS-COMPILED-CODE` at `high`, for every `.pyc`, `.pyo`, `.pyd`, `.so`, `.dylib` or `.dll` the walk reaches. Python imports a matching `__pycache__/*.pyc` in place of the `.py` beside it, imports a lone `.pyc` with no source at all, and tries an extension module before a `.py` of the same name, so the source a reviewer reads is not necessarily what runs. Trail of Bits' [`simple-formatter`](https://github.com/trailofbits/overtly-malicious-skills) ships a clean `utils.py` next to a `.pyc` that calls `eval`, and 0.2.0 reported it `LOOKS PLAIN` at exit `0`.
 
 ### Changed
 

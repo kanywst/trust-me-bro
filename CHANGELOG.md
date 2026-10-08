@@ -6,11 +6,11 @@ Notable changes, newest first. This project follows [Keep a Changelog](https://k
 
 ### Added
 
-- `OBFUS-COMPILED-CODE` at `high`, for every `.pyc`, `.pyo`, `.pyd`, `.so`, `.dylib` or `.dll` the walk reaches. Python imports a matching `__pycache__/*.pyc` in place of the `.py` beside it, imports a lone `.pyc` with no source at all, and tries an extension module before a `.py` of the same name, so the source a reviewer reads is not necessarily what runs. Trail of Bits' [`simple-formatter`](https://github.com/trailofbits/overtly-malicious-skills) ships a clean `utils.py` next to a `.pyc` that calls `eval`, and 0.2.0 reported it `LOOKS PLAIN` at exit `0`.
+- `OBFUS-COMPILED-CODE` at `high`, for compiled code anywhere the walk reaches, recognised by name (`.pyc` `.pyo` `.pyd` `.so` `.so.N` `.dylib` `.dll` `.node` `.pyz` `.whl` `.egg`) and by an ELF, Mach-O or PE header, so renaming a binary does not turn it back into text. Python imports a matching `__pycache__/*.pyc` in place of the `.py` beside it, imports a lone `.pyc` with no source at all, and tries an extension module before a `.py` of the same name, so the source a reviewer reads is not necessarily what runs. Trail of Bits' [`simple-formatter`](https://github.com/trailofbits/overtly-malicious-skills) ships a clean `utils.py` next to a `.pyc` that calls `eval`, and 0.2.0 reported it `LOOKS PLAIN` at exit `0`.
 
 ### Changed
 
-- `__pycache__` is no longer skipped as a cache directory. It is walked and hashed, so `--check` sees bytecode swapped after approval, and what it holds is reported by the rule above instead of as `SCAN-DIR-SKIPPED` at `low`.
+- `__pycache__` is no longer skipped as a cache directory. It is walked and hashed, so `--check` sees bytecode swapped after approval, and what it holds is reported by the rule above instead of as `SCAN-DIR-SKIPPED` at `low`. A lock written by 0.2.0 has no `__pycache__` entries, so `--check` reports any shipped there as added; that is correct, and accepting them means pinning again.
 
 ## [0.2.0] - 2026-09-16
 

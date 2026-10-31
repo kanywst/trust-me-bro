@@ -599,6 +599,28 @@ class Negation(unittest.TestCase):
                 self.assertEqual(finding["severity"], "high")
                 self.assertNotIn("described, not run", finding["title"])
 
+    def test_the_new_rules_stay_fast_on_one_very_long_line(self):
+        """Minified files are one line. Patterns that restart at every `cp` or `pip` must not go quadratic."""
+        import time
+
+        for unit in ("cp ", "pip a ", "git config ", "npm install -a ", "cargo --config ", "> x "):
+            with self.subTest(unit=unit):
+                started = time.perf_counter()
+                report_for(unit * (50_000 // len(unit)), name="min.js")
+                elapsed = time.perf_counter() - started
+                self.assertLess(elapsed, 5.0, f"{elapsed:.1f}s for a 50k line of {unit!r}")
+
+    def test_a_sentence_saying_the_skill_does_not_do_it_is_still_reported(self):
+        """Known false positive, kept on purpose: the skill writes the words before the match.
+
+        A table row that only names a variable is not an instruction and stays quiet.
+        """
+        report = report_for("We never run npm config set registry https://x.example here.\n")
+        self.assertIn("SUPPLY-REGISTRY-OVERRIDE", rule_ids(report))
+        self.assertNotIn(
+            "SUPPLY-REGISTRY-OVERRIDE", rule_ids(report_for("| `PIP_INDEX_URL` | where pip installs from |\n"))
+        )
+
     def test_trail_of_bits_dev_env_setup_lines_come_back_review(self):
         """The writes from trailofbits/overtly-malicious-skills@4ffbf94 skills/dev-env-setup/scripts/bootstrap.sh."""
         script = (

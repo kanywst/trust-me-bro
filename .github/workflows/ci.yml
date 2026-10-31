@@ -80,7 +80,8 @@ jobs:
       # Trail of Bits built these four skills to get past skill scanners. The
       # CHANGELOG claims which of them come back non-zero; this is where that
       # claim is checked, against a pinned commit so the set cannot move under it.
-      # csv-summarizer is a known miss and is reported, not asserted.
+      # csv-summarizer is a known miss and is reported, not asserted. The fetch
+      # needs github.com; if it or upstream is down the step fails, never passes.
       - name: The adversarial corpus comes back the way the CHANGELOG says
         env:
           CORPUS_SHA: 4ffbf9461ef0505f9ce76a0d3694a18ec33ea531
@@ -101,6 +102,17 @@ jobs:
               fail=1
             fi
           done
+          # Non-zero alone could come from some unrelated rule. Pin the two
+          # rules this skill is the reason for.
+          python scripts/scan.py "$RUNNER_TEMP/tob/skills/dev-env-setup" --json > "$RUNNER_TEMP/dev-env-setup.json" || true
+          python - "$RUNNER_TEMP/dev-env-setup.json" <<'PY' || fail=1
+          import json, sys
+          found = {f["id"] for f in json.load(open(sys.argv[1]))["findings"]}
+          missing = {"PERSIST-GIT-HOOK", "SUPPLY-REGISTRY-OVERRIDE"} - found
+          if missing:
+              print(f"::error::dev-env-setup no longer raises {sorted(missing)}")
+              sys.exit(1)
+          PY
           exit "$fail"
 
       - name: Pinning then checking an unchanged skill reports no drift

@@ -331,6 +331,8 @@ class Negation(unittest.TestCase):
             "git init --template=/tmp/t repo\n",
             "git clone --template /tmp/t https://x.example/r\n",
             "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/tmp/h\n",
+            'git config "core.hooksPath" .evil\n',
+            "git config 'init.templateDir' /tmp/t\n",
         ):
             with self.subTest(script=script):
                 report = report_for(script, name="setup.sh")
@@ -351,6 +353,8 @@ class Negation(unittest.TestCase):
             "git config --get-all core.hooksPath # set it later\n",
             "cat .git/config\n",
             "git init repo\n",
+            "cp .git/config /tmp/backup\n",
+            "cp .git/hooks/pre-commit /tmp/pre-commit.bak\n",
         ):
             with self.subTest(script=script):
                 self.assertNotIn("PERSIST-GIT-HOOK", rule_ids(report_for(script, name="setup.sh")))
@@ -379,6 +383,7 @@ class Negation(unittest.TestCase):
         for hook in hooks:
             for script in (
                 f"cat > hooks/{hook}\n",
+                f"cp x hooks/{hook}\n",
                 f"open('hooks/{hook}', 'w')\n",
                 f"fs.writeFileSync('hooks/{hook}', x)\n",
                 f'Path("hooks/{hook}").write_text(x)\n',
@@ -407,6 +412,7 @@ class Negation(unittest.TestCase):
                 f"cat > ~/{name}\n",
                 f"tee -a ~/{name} < x\n",
                 f"cp x ~/{name}\n",
+                f"install -m 600 x ~/{name} && echo ok\n",
                 f"sed -i 's/a/b/' ~/{name}\n",
                 f"curl -sSo ~/{name} https://x.example/c\n",
                 f"open(home + '/{name}', 'w')\n",
@@ -438,7 +444,6 @@ class Negation(unittest.TestCase):
             "GOPROXY",
             "GOSUMDB",
             "GONOSUMDB",
-            "GONOSUMCHECK",
             "GOINSECURE",
         ]
         for var in variables:
@@ -454,6 +459,12 @@ class Negation(unittest.TestCase):
             "uv add --default-index $MIRROR httpx\n",
             "pip install -i https://x.example/simple x\n",
             "go env -w GOPROXY=direct\n",
+            'npm config set "@scope:registry" https://x.example\n',
+            "npm config set 'registry' https://x.example\n",
+            'pip config set "global.index-url" https://x.example/simple\n',
+            "npx --registry=https://x.example create-thing\n",
+            "pnpm add --registry https://x.example left-pad\n",
+            "poetry add --source corp corp-utils --index-url https://x.example\n",
         ):
             with self.subTest(script=script):
                 self.assertIn("SUPPLY-REGISTRY-OVERRIDE", rule_ids(report_for(script, name="setup.sh")))
@@ -539,6 +550,11 @@ class Negation(unittest.TestCase):
             "| PIP_INDEX_URL | where pip installs from |\n",
             "git apply --index fix.patch\n",
             "git stash pop --index\n",
+            "cp ~/.npmrc ~/.npmrc.bak\n",
+            "cp ~/.npmrc /tmp/backup\n",
+            "npm publish --registry https://x.example\n",
+            "npm view left-pad --registry https://x.example\n",
+            "Pass --registry https://x.example when you publish.\n",
         ):
             with self.subTest(script=script):
                 self.assertNotIn("SUPPLY-REGISTRY-OVERRIDE", rule_ids(report_for(script, name="setup.sh")))

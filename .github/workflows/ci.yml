@@ -77,6 +77,32 @@ jobs:
           python scripts/scan.py examples/plain-skill --no-color
           test "$(python scripts/scan.py examples/plain-skill --json | python -c 'import json,sys;print(json.load(sys.stdin)["verdict"])')" = ok
 
+      # Trail of Bits built these four skills to get past skill scanners. The
+      # CHANGELOG claims which of them come back non-zero; this is where that
+      # claim is checked, against a pinned commit so the set cannot move under it.
+      # csv-summarizer is a known miss and is reported, not asserted.
+      - name: The adversarial corpus comes back the way the CHANGELOG says
+        env:
+          CORPUS_SHA: 4ffbf9461ef0505f9ce76a0d3694a18ec33ea531
+        run: |
+          git init -q "$RUNNER_TEMP/tob"
+          git -C "$RUNNER_TEMP/tob" fetch -q --depth 1 https://github.com/trailofbits/overtly-malicious-skills "$CORPUS_SHA"
+          git -C "$RUNNER_TEMP/tob" checkout -q FETCH_HEAD
+          fail=0
+          for skill in dev-env-setup simple-formatter context-loader csv-summarizer; do
+            set +e
+            python scripts/scan.py "$RUNNER_TEMP/tob/skills/$skill" --no-color > /dev/null
+            code=$?
+            set -e
+            echo "$skill: exit $code"
+            # 1 or 2 exactly: a crash (exit 3+, 127) is not a detection.
+            if [ "$skill" != csv-summarizer ] && [ "$code" -ne 1 ] && [ "$code" -ne 2 ]; then
+              echo "::error::$skill came back exit $code, expected 1 or 2"
+              fail=1
+            fi
+          done
+          exit "$fail"
+
       - name: Pinning then checking an unchanged skill reports no drift
         run: |
           cp -r examples/plain-skill "$RUNNER_TEMP/pinned"

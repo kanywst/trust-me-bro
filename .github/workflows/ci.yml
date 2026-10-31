@@ -96,15 +96,22 @@ jobs:
             code=$?
             set -e
             echo "$skill: exit $code"
-            # 1 or 2 exactly: a crash (exit 3+, 127) is not a detection.
-            if [ "$skill" != csv-summarizer ] && [ "$code" -ne 1 ] && [ "$code" -ne 2 ]; then
+            # 1 or 2 exactly: a crash (exit 3+, 127) is not a detection. The
+            # known miss may exit 0 but must not crash either.
+            if [ "$skill" = csv-summarizer ]; then
+              if [ "$code" -gt 2 ]; then echo "::error::$skill crashed, exit $code"; fail=1; fi
+            elif [ "$code" -ne 1 ] && [ "$code" -ne 2 ]; then
               echo "::error::$skill came back exit $code, expected 1 or 2"
               fail=1
             fi
           done
           # Non-zero alone could come from some unrelated rule. Pin the two
           # rules this skill is the reason for.
-          python scripts/scan.py "$RUNNER_TEMP/tob/skills/dev-env-setup" --json > "$RUNNER_TEMP/dev-env-setup.json" || true
+          set +e
+          python scripts/scan.py "$RUNNER_TEMP/tob/skills/dev-env-setup" --json > "$RUNNER_TEMP/dev-env-setup.json"
+          code=$?
+          set -e
+          if [ "$code" -ne 1 ] && [ "$code" -ne 2 ]; then echo "::error::--json scan exit $code"; fail=1; fi
           python - "$RUNNER_TEMP/dev-env-setup.json" <<'PY' || fail=1
           import json, sys
           found = {f["id"] for f in json.load(open(sys.argv[1]))["findings"]}

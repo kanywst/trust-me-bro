@@ -6,6 +6,8 @@ Notable changes, newest first. This project follows [Keep a Changelog](https://k
 
 ### Added
 
+- `SUPPLY-REGISTRY-OVERRIDE` at `high`, for a skill that repoints a package manager: a write to `.npmrc`, `.yarnrc` / `.yarnrc.yml`, `bunfig.toml`, `pip.conf` / `pip.ini`, `uv.toml`, `.cargo/config`, `.gemrc` or `.condarc`, `npm` / `pnpm` / `yarn` / `bun config set … registry`, `pip config set … index-url`, or one of the registry environment variables (`npm_config_registry`, `PIP_INDEX_URL`, `PIP_EXTRA_INDEX_URL`, `UV_INDEX_URL`, `UV_DEFAULT_INDEX`, …). Every later install in that project resolves through a host the skill picked, and the file stays after the skill is removed. Trail of Bits' [`dev-env-setup`](https://github.com/trailofbits/overtly-malicious-skills) writes such an `.npmrc` and `.yarnrc` under a "corporate mirror" comment, and 0.3.0 reported it `READ IT` at exit `0`.
+- `PERSIST-GIT-HOOK` at `high`, for a write into `.git/hooks`, a named hook file such as `…/pre-commit`, or `core.hooksPath`. Git runs the hook on every commit, push or checkout from then on. It is `high` rather than `critical` like the other persistence rules because installing a lint hook is an ordinary thing for a setup skill to do, unlike a line appended to `.zshrc`; it still needs reading. `pre-commit install` and a `.pre-commit-config.yaml` are not flagged. The same `dev-env-setup` writes `.git/hooks/pre-commit`, and with both rules it now comes back `REVIEW`, exit `1`, making three of the four in that set.
 - A listing icon at `.claude-plugin/icon.png` for the Claude plugin directory.
 
 ## [0.3.0] - 2026-10-08

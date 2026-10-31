@@ -304,6 +304,67 @@ class Negation(unittest.TestCase):
         report = report_for("```bash\n(crontab -l; echo '* * * * * x') | crontab -\n```\n")
         self.assertIn("PERSIST-SHELL-PROFILE", rule_ids(report))
 
+    def test_writing_a_git_hook_is_persistence(self):
+        """Trail of Bits' dev-env-setup names the directory on one line and writes on the next."""
+        for script in (
+            'hooks_dir="$PROJECT/.git/hooks"\ncat > "$hooks_dir/pre-commit" << \'HOOK\'\n',
+            "cp scripts/hook.sh .git/hooks/pre-push\n",
+            "git config core.hooksPath .githooks\n",
+            "ln -sf ../../hook.sh repo/hooks/post-checkout\n",
+            "open('repo/hooks/commit-msg', 'w').write(body)\n",
+        ):
+            with self.subTest(script=script):
+                report = report_for(script, name="setup.sh")
+                self.assertIn("PERSIST-GIT-HOOK", rule_ids(report))
+                self.assertEqual(report["verdict"], "review")
+
+    def test_hook_tooling_and_lookalike_names_are_not_git_hooks(self):
+        for script in (
+            "pip install pre-commit\npre-commit install\n",
+            "cat > .pre-commit-config.yaml << EOF\n",
+            "echo notes > docs/pre-commit.md\n",
+            "# never write to .git/hooks\n",
+        ):
+            with self.subTest(script=script):
+                self.assertNotIn("PERSIST-GIT-HOOK", rule_ids(report_for(script, name="setup.sh")))
+
+    def test_overriding_the_package_registry_is_flagged(self):
+        for script in (
+            'cat > "$PROJECT/.npmrc" << EOF\n',
+            'printf \'registry "%s"\\n\' "$R" >> ~/.yarnrc\n',
+            "echo 'npmRegistryServer: https://x.example' > .yarnrc.yml\n",
+            "npm config set registry https://x.example\n",
+            "yarn config set npmRegistryServer https://x.example\n",
+            "pip config set global.index-url https://x.example/simple\n",
+            "export PIP_EXTRA_INDEX_URL=https://x.example/simple\n",
+            "export npm_config_registry=https://x.example\n",
+            "UV_INDEX_URL=https://x.example uv sync\n",
+            "tee ~/.config/pip/pip.conf < conf\n",
+            'Path.home().joinpath(".cargo/config.toml").write_text(cfg)\n',
+        ):
+            with self.subTest(script=script):
+                report = report_for(script, name="setup.sh")
+                self.assertIn("SUPPLY-REGISTRY-OVERRIDE", rule_ids(report))
+                self.assertEqual(report["verdict"], "review")
+
+    def test_reading_registry_config_is_not_an_override(self):
+        for script in (
+            "cat ~/.npmrc\n",
+            "npm config get registry\n",
+            "pip config list\n",
+            "# do not write to .npmrc\n",
+        ):
+            with self.subTest(script=script):
+                self.assertNotIn("SUPPLY-REGISTRY-OVERRIDE", rule_ids(report_for(script, name="setup.sh")))
+
+    def test_describing_a_registry_override_in_prose_is_demoted(self):
+        report = report_for("Run `npm config set registry https://x.example` first.\n\nIt sets npm config set registry for you.\n")
+        finding = next(f for f in report["findings"] if f["id"] == "SUPPLY-REGISTRY-OVERRIDE")
+        self.assertEqual(finding["severity"], "high")  # backticked: the agent runs it
+        prose = report_for("This skill uses npm config set registry to pick a mirror.\n")
+        finding = next(f for f in prose["findings"] if f["id"] == "SUPPLY-REGISTRY-OVERRIDE")
+        self.assertEqual(finding["severity"], "medium")
+
 
 class Provenance(unittest.TestCase):
     def provenance_for(self, files: dict) -> dict:

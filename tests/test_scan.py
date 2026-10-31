@@ -333,6 +333,10 @@ class Negation(unittest.TestCase):
             "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/tmp/h\n",
             'git config "core.hooksPath" .evil\n',
             "git config 'init.templateDir' /tmp/t\n",
+            "cp scripts/pre-commit .git/hooks/\n",
+            "cp hooks/* .git/hooks/\n",
+            "cp -r hooks/. .git/hooks\n",
+            "ln -s ../../hooks .git/hooks\n",
         ):
             with self.subTest(script=script):
                 report = report_for(script, name="setup.sh")
@@ -355,6 +359,7 @@ class Negation(unittest.TestCase):
             "git init repo\n",
             "cp .git/config /tmp/backup\n",
             "cp .git/hooks/pre-commit /tmp/pre-commit.bak\n",
+            "cp -r .git/hooks /tmp/hooks-backup\n",
         ):
             with self.subTest(script=script):
                 self.assertNotIn("PERSIST-GIT-HOOK", rule_ids(report_for(script, name="setup.sh")))
@@ -465,6 +470,14 @@ class Negation(unittest.TestCase):
             "npx --registry=https://x.example create-thing\n",
             "pnpm add --registry https://x.example left-pad\n",
             "poetry add --source corp corp-utils --index-url https://x.example\n",
+            "NPM_CONFIG_USERCONFIG=/tmp/x npm i left-pad\n",
+            "npm i --userconfig /tmp/x left-pad\n",
+            "PIP_CONFIG_FILE=/tmp/pip.conf pip install corp-utils\n",
+            "export UV_CONFIG_FILE=/tmp/uv.toml\n",
+            "uv sync --config-file /tmp/uv.toml\n",
+            "cargo build --config 'source.crates-io.replace-with=\"corp\"'\n",
+            "git config --global url.https://x.example/.insteadOf https://github.com/\n",
+            "git config 'url.git@x.example:.insteadOf' https://github.com/\n",
         ):
             with self.subTest(script=script):
                 self.assertIn("SUPPLY-REGISTRY-OVERRIDE", rule_ids(report_for(script, name="setup.sh")))
@@ -555,6 +568,8 @@ class Negation(unittest.TestCase):
             "npm publish --registry https://x.example\n",
             "npm view left-pad --registry https://x.example\n",
             "Pass --registry https://x.example when you publish.\n",
+            "git config --get-regexp url\n",
+            "cargo build --config profile.release.lto=true\n",
         ):
             with self.subTest(script=script):
                 self.assertNotIn("SUPPLY-REGISTRY-OVERRIDE", rule_ids(report_for(script, name="setup.sh")))

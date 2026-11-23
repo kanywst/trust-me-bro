@@ -1390,6 +1390,19 @@ class HostileInput(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn("link.md", message)
 
+    def test_a_long_run_of_blank_lines_scans_in_linear_time(self):
+        """`^\\s*` under MULTILINE crossed newlines, so 100k blank lines took minutes.
+
+        Only a file with no `allowed-tools` line hits it: with one, the first
+        attempt runs straight through the blanks and matches.
+        """
+        import time
+
+        started = time.perf_counter()
+        report_for("import os\n" + "\n" * 100_000 + "print(1)\n", name="a.py")
+        elapsed = time.perf_counter() - started
+        self.assertLess(elapsed, 10.0, f"{elapsed:.1f}s for 100k blank lines")
+
     def test_a_very_long_line_is_reported_and_does_not_hang(self):
         report = report_for("x" * 50_000 + "\n")
         self.assertIn("OBFUS-LONG-LINE", rule_ids(report))

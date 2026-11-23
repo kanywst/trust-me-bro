@@ -4,6 +4,10 @@ Notable changes, newest first. This project follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Fixed
+
+- A file with a long run of blank lines and no `allowed-tools` line took quadratic time: the check for that line used `^\s*` under multi-line mode, where `\s` crosses newlines, so every blank line rescanned the rest of the run. `csv-summarizer` above took 23 seconds on a CI runner and over two minutes on a laptop; it now takes under one.
+
 ## [0.4.0] - 2026-10-31
 
 A skill that changes where your package manager installs from, or slips a hook into git, is no longer `READ IT`. Trail of Bits' [`dev-env-setup`](https://github.com/trailofbits/overtly-malicious-skills), built to get past skill scanners, repoints npm and yarn and writes `.git/hooks/pre-commit` under a "corporate standards" story, and 0.3.0 let it through at exit `0`. It now comes back `REVIEW`, exit `1`, which leaves one of that set's four undetected.

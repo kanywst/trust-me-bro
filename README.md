@@ -100,6 +100,7 @@ python3 scripts/scan.py ./some-skill
 | `PERSIST-SHELL-PROFILE` | installs itself into your shell or a scheduler |
 | `PERSIST-GIT-HOOK` | installs or redirects git hooks |
 | `SUPPLY-REGISTRY-OVERRIDE` | sets where your package manager installs from |
+| `LEAK-ENV-DUMP` | prints or enumerates the whole environment, values included |
 | `OBFUS-COMPILED-CODE` | ships bytecode, a native module or a packed archive, which runs instead of the source you read |
 | `HOOK-DECLARED` | declares a hook: a command that runs on the agent's own events |
 | `HOOK-POINTER-UNREAD` | points at a hook file that is not in what was scanned |

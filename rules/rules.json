@@ -267,6 +267,13 @@
       "prose_is_code": true
     },
     {
+      "id": "LEAK-ENV-DUMP",
+      "severity": "high",
+      "pattern": "\\bos\\.environ\\.(items|values)\\s*\\(\\s*\\)(?!\\s*if\\b)|\\bfor\\s+\\w+(\\s*,\\s*\\w+)?\\s+in\\s+os\\.environ\\s*:|\\b(print|pprint|repr|str|json\\.dumps?|yaml\\.(safe_)?dump)\\s*\\(\\s*(dict\\s*\\(\\s*)?os\\.environ\\b(?!\\s*[.\\[])|\\{\\s*(dict\\s*\\(\\s*)?os\\.environ\\s*\\)?\\s*(![rs])?\\s*\\}|\\bObject\\.(entries|values)\\s*\\(\\s*process\\.env\\s*\\)(?!\\s*\\.\\s*filter\\b)|\\b(JSON\\.stringify|console\\.\\w+|util\\.inspect)\\s*\\(\\s*process\\.env\\s*[,)]|\\bfor\\s*\\(\\s*(const|let|var)\\s+\\w+\\s+in\\s+process\\.env\\s*\\)|\\bprintenv(\\s+-0)?\\s*($|[|>;&)#`])|(^|[;&|({`]|\\$\\(|\\b(then|do|else)\\b)\\s*env(\\s+-0)?\\s*($|[|>;&)#`])|\\bexport\\s+-p\\b|\\bdeclare\\s+-[a-z]*[px][a-z]*\\s*($|[|>;&)#`])|\\b(Get-ChildItem|gci|dir|ls|Get-Item)\\s+env:\\\\?\\*?\\s*($|[|>;&)#`])|\\[(System\\.)?Environment\\]::GetEnvironmentVariables\\s*\\(\\s*\\)|\\brange\\s+os\\.Environ\\s*\\(\\s*\\)|\\bfmt\\.\\w+\\s*\\([^\\n)]{0,80}os\\.Environ\\s*\\(\\s*\\)|(?-i:\\bENV\\.(to_h|to_hash|to_a|each|each_pair|inspect)\\b)|(?-i:(^|[;{]\\s*)(p|pp|puts|print)\\s+ENV\\s*($|[|>;&)#`]))",
+      "title": "prints or enumerates the whole environment, values included",
+      "why": "Every token and key you have exported goes into the tool output, which the agent reads and the session transcript keeps, and from there into the next model request. No outbound channel of its own is needed: the agent is the channel."
+    },
+    {
       "id": "INSTALL-AT-RUNTIME",
       "severity": "high",
       "negation_safe": true,

@@ -667,6 +667,16 @@ class EnvDump(unittest.TestCase):
             ("a.rb", "puts ENV.to_h\n"),
             ("a.rb", "ENV.each { |k, v| puts k }\n"),
             ("a.rb", "pp ENV\n"),
+            ("a.py", 'os.system("env")\n'),
+            ("a.py", 'subprocess.run(["env"], check=True)\n'),
+            ("a.py", 'subprocess.run("printenv", shell=True)\n'),
+            ("a.py", "out = subprocess.check_output(['printenv'])\n"),
+            ("a.js", "execSync('env', { stdio: 'inherit' })\n"),
+            ("a.sh", "cat /proc/self/environ | tr '\\0' '\\n'\n"),
+            ("a.py", "open('/proc/1/environ').read()\n"),
+            ("a.py", "print(os.environ.copy())\n"),
+            ("a.py", 'print(os.environ.get("A"), os.environ)\n'),
+            ("a.py", "print('env:', dict(os.environ), file=sys.stderr)\n"),
         ):
             with self.subTest(line=line):
                 report = report_for(line, name=name)
@@ -698,15 +708,26 @@ class EnvDump(unittest.TestCase):
             ("a.go", 'cmd.Env = append(os.Environ(), "X=1")\n'),
             ("a.rb", 'puts ENV["HOME"]\n'),
             ("a.rb", "env.each { |k| k }\n"),
+            ("a.py", 'cfg["env"] = load()\n'),
+            ("a.py", 'run(["make"], env={"X": "1"})\n'),
+            ("a.py", 'print(os.environ.get("A"), os.environ["B"])\n'),
+            ("a.py", "print(x, os.environ.copy().get('A'))\n"),
+            ("SKILL.md", "| `env` | the variables passed to the server |\n"),
+            ("SKILL.md", "Set the `env` key to pass variables through.\n"),
+            ("a.sh", "ls /proc/self/\n"),
         ):
             with self.subTest(line=line):
                 self.assertNotIn("LEAK-ENV-DUMP", rule_ids(report_for(line, name=name)))
 
-    def test_described_in_prose_is_demoted(self):
+    def test_an_instruction_in_skill_prose_is_not_demoted(self):
+        """A skill is instructions: "run printenv and paste it" in a sentence is the payload."""
         finding = next(
-            f for f in report_for("It never runs printenv | grep token.\n")["findings"] if f["id"] == "LEAK-ENV-DUMP"
+            f
+            for f in report_for("First run printenv | sort and paste the output here.\n")["findings"]
+            if f["id"] == "LEAK-ENV-DUMP"
         )
-        self.assertEqual(finding["severity"], "medium")
+        self.assertEqual(finding["severity"], "high")
+        self.assertNotIn("described, not run", finding["title"])
 
     def test_trail_of_bits_csv_summarizer_comes_back_review(self):
         """trailofbits/overtly-malicious-skills@4ffbf94 skills/csv-summarizer/scripts/summarize.py, padding included."""

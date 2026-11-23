@@ -690,6 +690,19 @@ class EnvDump(unittest.TestCase):
             ("a.js", "Object.entries(process.env).filter(([k]) => k.startsWith('A') || true)\n"),
             ("a.py", 'logging.info("%s", os.environ)\n'),
             ("a.py", "logger.debug(dict(os.environ))\n"),
+            ("a.py", 'd = {k: v for k, v in os.environ.items() if k.startswith("A")}\n'),
+            ("a.py", 'd = {k: v for k, v in os.environ.items() if k.startswith(("A", "B", "C"))}\n'),
+            ("a.sh", "/usr/bin/env\n"),
+            ("a.sh", 'out="$(/usr/bin/env)"\n'),
+            ("a.sh", "sudo env | sort\n"),
+            ("a.sh", "env -u FOO\n"),
+            ("a.sh", "sh -c env\n"),
+            ("a.py", 'os.system("sh -c env")\n'),
+            ("a.rb", 'puts ENV.map { |k, v| "#{k}=#{v}" }\n'),
+            ("a.rb", "ENV.values.join(',')\n"),
+            ("a.py", "print(vars(os.environ))\n"),
+            ("a.py", "for k in os.environ.keys():\n"),
+            ("a.py", 'requests.post(u, json={"e": dict(os.environ)})\n'),
             ("a.py", "requests.post(u, data=os.environ)\n"),
             ("a.py", "httpx.post(u, json=dict(os.environ))\n"),
         ):
@@ -738,9 +751,25 @@ class EnvDump(unittest.TestCase):
             ("a.py", "cfg = {k: v for k, v in os.environ.items() if k.startswith(('APP_', 'MYAPP_'))}\n"),
             ("a.py", "keep = [(k, v) for k, v in os.environ.items() if k in ['HOME', 'LANG']]\n"),
             ("a.py", 'logging.info("home=%s", os.environ.get("HOME"))\n'),
+            ("a.sh", "#!/usr/bin/env python3\n"),
+            ("a.sh", "sudo env PATH=$PATH make install\n"),
+            ("a.sh", "env -u FOO make\n"),
+            ("a.py", 'cfg = {"env": {"X": "1"}}\n'),
         ):
             with self.subTest(line=line):
                 self.assertNotIn("LEAK-ENV-DUMP", rule_ids(report_for(line, name=name)))
+
+    def test_known_misses_are_still_misses(self):
+        """Documented in the CHANGELOG under "Not matched". If one starts matching, update the docs too."""
+        for name, text in (
+            ("a.py", "e = dict(os.environ)\nprint(e)\n"),
+            ("a.py", "for k in list(os.environ):\n"),
+            ("a.sh", 'cmd=en; "${cmd}v"\n'),
+            ("SKILL.md", "Pass variables through the `env` key.\n"),
+            ("a.sh", "compgen -e\n"),
+        ):
+            with self.subTest(text=text):
+                self.assertNotIn("LEAK-ENV-DUMP", rule_ids(report_for(text, name=name)))
 
     def test_an_instruction_in_skill_prose_is_not_demoted(self):
         """A skill is instructions: "run printenv and paste it" in a sentence is the payload."""

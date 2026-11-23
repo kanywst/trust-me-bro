@@ -80,8 +80,8 @@ jobs:
       # Trail of Bits built these four skills to get past skill scanners. The
       # CHANGELOG claims which of them come back non-zero; this is where that
       # claim is checked, against a pinned commit so the set cannot move under it.
-      # csv-summarizer is a known miss and is reported, not asserted. The fetch
-      # needs github.com; if it or upstream is down the step fails, never passes.
+      # The fetch needs github.com; if it or upstream is down the step fails,
+      # never passes.
       - name: The adversarial corpus comes back the way the CHANGELOG says
         env:
           CORPUS_SHA: 4ffbf9461ef0505f9ce76a0d3694a18ec33ea531
@@ -96,11 +96,8 @@ jobs:
             code=$?
             set -e
             echo "$skill: exit $code"
-            # 1 or 2 exactly: a crash (exit 3+, 127) is not a detection. The
-            # known miss may exit 0 but must not crash either.
-            if [ "$skill" = csv-summarizer ]; then
-              if [ "$code" -gt 2 ]; then echo "::error::$skill crashed, exit $code"; fail=1; fi
-            elif [ "$code" -ne 1 ] && [ "$code" -ne 2 ]; then
+            # 1 or 2 exactly: a crash (exit 3+, 127) is not a detection.
+            if [ "$code" -ne 1 ] && [ "$code" -ne 2 ]; then
               echo "::error::$skill came back exit $code, expected 1 or 2"
               fail=1
             fi
@@ -118,6 +115,18 @@ jobs:
           missing = {"PERSIST-GIT-HOOK", "SUPPLY-REGISTRY-OVERRIDE"} - found
           if missing:
               print(f"::error::dev-env-setup no longer raises {sorted(missing)}")
+              sys.exit(1)
+          PY
+          set +e
+          python scripts/scan.py "$RUNNER_TEMP/tob/skills/csv-summarizer" --json > "$RUNNER_TEMP/csv-summarizer.json"
+          code=$?
+          set -e
+          if [ "$code" -ne 1 ] && [ "$code" -ne 2 ]; then echo "::error::--json scan exit $code"; fail=1; fi
+          python - "$RUNNER_TEMP/csv-summarizer.json" <<'PY' || fail=1
+          import json, sys
+          found = {f["id"] for f in json.load(open(sys.argv[1]))["findings"]}
+          if "LEAK-ENV-DUMP" not in found:
+              print("::error::csv-summarizer no longer raises LEAK-ENV-DUMP")
               sys.exit(1)
           PY
           exit "$fail"

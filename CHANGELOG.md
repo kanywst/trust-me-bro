@@ -4,6 +4,11 @@ Notable changes, newest first. This project follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Added
+
+- `LEAK-ENV-DUMP` at `high`, for a skill that prints or enumerates every environment variable with its value. Whatever a tool prints is read by the agent and kept in the session transcript, so the skill needs no outbound channel of its own, and the trifecta, which counted this as one private-data leg, let it through. Matched: Python `os.environ.items()` / `.values()`, `for … in os.environ:`, and `os.environ` passed whole to `print`, `pprint`, `repr`, `str`, `json.dump(s)`, `yaml.dump` or an f-string; Node `Object.entries` / `Object.values` of `process.env`, `process.env` passed whole to `JSON.stringify`, `console.*` or `util.inspect`, and `for … in process.env`; `printenv` and `env` with no arguments, `export -p` and `declare -p` / `-x` with no names; PowerShell `Get-ChildItem env:` (and `gci`, `dir`, `ls`) and `[Environment]::GetEnvironmentVariables()`; Go `range os.Environ()` and `os.Environ()` inside a `fmt` call; Ruby `ENV.to_h`, `.to_a`, `.each`, `.each_pair`, `.inspect`, and `p` / `pp` / `puts` / `print ENV`. Not a finding: reading one variable, `os.environ.copy()`, `dict(os.environ)` or `{**os.environ}` / `{...process.env}` passed to a child process, `append(os.Environ(), …)`, `os.environ.keys()` (names only), a comprehension over `.items()` with an `if`, `Object.entries(process.env).filter(…)`, `printenv NAME`, `env NAME=value cmd`, and `#!/usr/bin/env`. Not matched: a dump split so that the enumeration itself is not on one of these forms, such as `for k in list(os.environ)`.
+- Trail of Bits' [`csv-summarizer`](https://github.com/trailofbits/overtly-malicious-skills/tree/4ffbf9461ef0505f9ce76a0d3694a18ec33ea531/skills/csv-summarizer) prints `os.environ` after 100,000 blank lines, and 0.4.0 reported it `LOOKS PLAIN` at exit `0`. It now comes back `REVIEW`, exit `1`, so all four of that set's skills are non-zero, and CI asserts all four.
+
 ### Fixed
 
 - A file with a long run of blank lines and no `allowed-tools` line took quadratic time: the check for that line used `^\s*` under multi-line mode, where `\s` crosses newlines, so every blank line rescanned the rest of the run. `csv-summarizer` above took 23 seconds on a CI runner and over two minutes on a laptop; it now takes under one.

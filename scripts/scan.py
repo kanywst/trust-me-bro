@@ -511,7 +511,12 @@ def scan_text(rel: str, path: Path, text: str, rules: dict) -> dict:
     """Everything one readable file contributes as text."""
     lines = text.splitlines()
     result = apply_rules(rel, lines, code_mask(path, lines), rules)
-    result["declares_allowed_tools"] = bool(re.search(r"^\s*allowed[-_]tools\s*:", text, re.IGNORECASE | re.MULTILINE))
+    # `[ \t]`, not `\s`: under MULTILINE `\s*` crosses newlines, so every line
+    # start in a run of blank lines rescanned the whole run, and 100k blank
+    # lines (csv-summarizer pads its payload exactly that way) took minutes.
+    result["declares_allowed_tools"] = bool(
+        re.search(r"^[ \t]*allowed[-_]tools[ \t]*:", text, re.IGNORECASE | re.MULTILINE)
+    )
     result["hosts"] = URL_RE.findall(text)
     return result
 

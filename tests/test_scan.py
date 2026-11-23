@@ -677,6 +677,14 @@ class EnvDump(unittest.TestCase):
             ("a.py", "print(os.environ.copy())\n"),
             ("a.py", 'print(os.environ.get("A"), os.environ)\n'),
             ("a.py", "print('env:', dict(os.environ), file=sys.stderr)\n"),
+            # A filter is exempt only when it names a literal prefix or set.
+            ("a.py", "print({k: v for k, v in os.environ.items() if True})\n"),
+            ("a.py", "print({k: v for k, v in os.environ.items() if v})\n"),
+            ("a.py", "d = {k: os.environ[k] for k in os.environ if k}\n"),
+            ("a.js", "Object.entries(process.env).filter(() => true)\n"),
+            ("a.js", "Object.entries(process.env).filter(([k]) => k)\n"),
+            ("a.py", "requests.post(u, data=os.environ)\n"),
+            ("a.py", "httpx.post(u, json=dict(os.environ))\n"),
         ):
             with self.subTest(line=line):
                 report = report_for(line, name=name)
@@ -715,6 +723,11 @@ class EnvDump(unittest.TestCase):
             ("SKILL.md", "| `env` | the variables passed to the server |\n"),
             ("SKILL.md", "Set the `env` key to pass variables through.\n"),
             ("a.sh", "ls /proc/self/\n"),
+            ("a.py", 'print(dict(os.environ)["A"])\n'),
+            ("a.py", "cfg = {k: v for k, v in os.environ.items() if k in {'HOME', 'LANG'}}\n"),
+            ("a.py", "names = [k for k in os.environ if k.startswith('APP_')]\n"),
+            ("a.js", "Object.entries(process.env).filter(([k]) => k.startsWith(`APP_`))\n"),
+            ("a.py", "subprocess.run(cmd, env=os.environ)\n"),
         ):
             with self.subTest(line=line):
                 self.assertNotIn("LEAK-ENV-DUMP", rule_ids(report_for(line, name=name)))

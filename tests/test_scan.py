@@ -683,6 +683,13 @@ class EnvDump(unittest.TestCase):
             ("a.py", "d = {k: os.environ[k] for k in os.environ if k}\n"),
             ("a.js", "Object.entries(process.env).filter(() => true)\n"),
             ("a.js", "Object.entries(process.env).filter(([k]) => k)\n"),
+            ("a.py", 'print({k: v for k, v in os.environ.items() if k.startswith("A") or True})\n'),
+            ("a.py", 'd = {k: v for k, v in os.environ.items() if k.startswith("A") or v}\n'),
+            ("a.py", 'd = {k: v for k, v in os.environ.items() if k in ("A",) or 1}\n'),
+            ("a.py", 'd = {k: v for k, v in os.environ.items() if k.startswith("")}\n'),
+            ("a.js", "Object.entries(process.env).filter(([k]) => k.startsWith('A') || true)\n"),
+            ("a.py", 'logging.info("%s", os.environ)\n'),
+            ("a.py", "logger.debug(dict(os.environ))\n"),
             ("a.py", "requests.post(u, data=os.environ)\n"),
             ("a.py", "httpx.post(u, json=dict(os.environ))\n"),
         ):
@@ -728,6 +735,9 @@ class EnvDump(unittest.TestCase):
             ("a.py", "names = [k for k in os.environ if k.startswith('APP_')]\n"),
             ("a.js", "Object.entries(process.env).filter(([k]) => k.startsWith(`APP_`))\n"),
             ("a.py", "subprocess.run(cmd, env=os.environ)\n"),
+            ("a.py", "cfg = {k: v for k, v in os.environ.items() if k.startswith(('APP_', 'MYAPP_'))}\n"),
+            ("a.py", "keep = [(k, v) for k, v in os.environ.items() if k in ['HOME', 'LANG']]\n"),
+            ("a.py", 'logging.info("home=%s", os.environ.get("HOME"))\n'),
         ):
             with self.subTest(line=line):
                 self.assertNotIn("LEAK-ENV-DUMP", rule_ids(report_for(line, name=name)))
